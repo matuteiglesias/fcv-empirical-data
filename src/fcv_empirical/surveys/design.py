@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -21,7 +22,12 @@ def _optional_text(name: str, value: str | None) -> None:
 
 @dataclass(frozen=True)
 class SurveyDesignRecord:
-    """Source-facing sampling/design facts for one survey observation."""
+    """Sampling/design facts for one survey observation.
+
+    Source weights remain source facts. A normalized weight may be carried only when the
+    transformation that produced it is explicitly named; this record never chooses which weight
+    an experiment should use.
+    """
 
     survey_id: str
     observation_id: str
@@ -32,6 +38,7 @@ class SurveyDesignRecord:
     source_weight_variable: str | None = None
     source_weight_value: WeightValue | None = None
     normalized_weight_value: float | None = None
+    weight_normalization_method: str | None = None
 
     def __post_init__(self) -> None:
         if not self.survey_id or not self.survey_id.strip():
@@ -39,5 +46,24 @@ class SurveyDesignRecord:
         if not self.observation_id or not self.observation_id.strip():
             raise ValueError("observation_id must be non-empty")
         validate_observation_grain(self.natural_grain)
-        for name in ("cluster_id", "psu_id", "stratum_id", "source_weight_variable"):
+        for name in (
+            "cluster_id",
+            "psu_id",
+            "stratum_id",
+            "source_weight_variable",
+            "weight_normalization_method",
+        ):
             _optional_text(name, getattr(self, name))
+
+        if self.normalized_weight_value is None:
+            if self.weight_normalization_method is not None:
+                raise ValueError(
+                    "weight_normalization_method requires normalized_weight_value"
+                )
+        else:
+            if not math.isfinite(self.normalized_weight_value):
+                raise ValueError("normalized_weight_value must be finite when supplied")
+            if self.weight_normalization_method is None:
+                raise ValueError(
+                    "normalized_weight_value requires an explicit weight_normalization_method"
+                )

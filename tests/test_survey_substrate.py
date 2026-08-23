@@ -1,7 +1,10 @@
+import math
 from dataclasses import fields
 from datetime import date
 
-from empirical_contracts import SourceFileRef
+import pytest
+from empirical_contracts import GeographySpec, SourceFileRef, SourceSnapshotRef
+from spatial_foundation.geography import MembershipStatus
 
 from fcv_empirical.surveys import (
     SurveyCatalogEntry,
@@ -10,7 +13,17 @@ from fcv_empirical.surveys import (
     SurveyGeographyLink,
     SurveyVariableMetadata,
     TemporalSemantics,
+    validate_survey_file_link,
 )
+
+
+def _gadm_adm2() -> GeographySpec:
+    return GeographySpec(
+        provider="gadm",
+        version="4.1",
+        scheme="admin",
+        level="2",
+    )
 
 
 def test_dhs_household_can_preserve_cluster_and_source_weight() -> None:
@@ -23,7 +36,6 @@ def test_dhs_household_can_preserve_cluster_and_source_weight() -> None:
         fieldwork_end=date(2022, 7, 31),
         survey_phase="phase-8",
         release="2022-release",
-        source_snapshot_id="snapshot-dhs-ken-2022",
     )
     household = SurveyDesignRecord(
         survey_id=survey.survey_id,
@@ -40,6 +52,7 @@ def test_dhs_household_can_preserve_cluster_and_source_weight() -> None:
     assert household.cluster_id == "cluster-17"
     assert household.source_weight_variable == "household_weight"
     assert household.normalized_weight_value is None
+    assert household.weight_normalization_method is None
 
 
 def test_afrobarometer_respondent_can_preserve_round_ea_and_weight() -> None:
@@ -50,7 +63,6 @@ def test_afrobarometer_respondent_can_preserve_round_ea_and_weight() -> None:
         survey_year=2022,
         survey_phase="round-9",
         release="round-9-release",
-        source_snapshot_id="snapshot-afb-r9",
     )
     respondent = SurveyDesignRecord(
         survey_id=survey.survey_id,
@@ -87,13 +99,15 @@ def test_enumeration_area_observation_is_not_respondent_grain() -> None:
 
 
 def test_displaced_point_can_keep_multiple_candidate_geographies_and_unmatched_state() -> None:
+    geography = _gadm_adm2()
     candidates = (
         SurveyGeographyLink(
             survey_id="dhs-ken-2022",
             source_object_id="cluster-17",
             source_object_type="survey_cluster",
-            geo_uid="gadm:KEN:adm2:001",
-            assignment_status="ambiguous_multiple",
+            geography=geography,
+            geo_uid="gadm:4.1:adm2:KEN.1.1_1",
+            assignment_status=MembershipStatus.AMBIGUOUS_MULTIPLE,
             assignment_method="spatial_foundation.assign_points",
             uncertainty_metadata={"displacement_radius_km": 5.0, "candidate_count": 2},
         ),
@@ -101,8 +115,9 @@ def test_displaced_point_can_keep_multiple_candidate_geographies_and_unmatched_s
             survey_id="dhs-ken-2022",
             source_object_id="cluster-17",
             source_object_type="survey_cluster",
-            geo_uid="gadm:KEN:adm2:002",
-            assignment_status="ambiguous_multiple",
+            geography=geography,
+            geo_uid="gadm:4.1:adm2:KEN.1.2_1",
+            assignment_status=MembershipStatus.AMBIGUOUS_MULTIPLE,
             assignment_method="spatial_foundation.assign_points",
             uncertainty_metadata={"displacement_radius_km": 5.0, "candidate_count": 2},
         ),
@@ -111,17 +126,58 @@ def test_displaced_point_can_keep_multiple_candidate_geographies_and_unmatched_s
         survey_id="dhs-ken-2022",
         source_object_id="cluster-99",
         source_object_type="survey_cluster",
+        geography=geography,
         geo_uid=None,
-        assignment_status="unmatched_outside",
+        assignment_status=MembershipStatus.UNMATCHED_OUTSIDE,
         assignment_method="spatial_foundation.assign_points",
     )
 
     assert {row.geo_uid for row in candidates} == {
-        "gadm:KEN:adm2:001",
-        "gadm:KEN:adm2:002",
+        "gadm:4.1:adm2:KEN.1.1_1",
+        "gadm:4.1:adm2:KEN.1.2_1",
     }
-    assert all(row.assignment_status == "ambiguous_multiple" for row in candidates)
+    assert all(
+        row.assignment_status is MembershipStatus.AMBIGUOUS_MULTIPLE for row in candidates
+    )
+    assert all(row.geography == geography for row in candidates)
     assert unmatched.geo_uid is None
+
+
+def test_geography_link_rejects_contradictory_or_private_status_semantics() -> None:
+    geography = _gadm_adm2()
+
+    with pytest.raises(ValueError, match="require geo_uid"):
+        SurveyGeographyLink(
+            survey_id="dhs-ken-2022",
+            source_object_id="cluster-17",
+            source_object_type="survey_cluster",
+            geography=geography,
+            geo_uid=None,
+            assignment_status=MembershipStatus.MATCHED_UNIQUE,
+            assignment_method="spatial_foundation.assign_points",
+        )
+
+    with pytest.raises(ValueError, match="must not carry geo_uid"):
+        SurveyGeographyLink(
+            survey_id="dhs-ken-2022",
+            source_object_id="cluster-17",
+            source_object_type="survey_cluster",
+            geography=geography,
+            geo_uid="gadm:4.1:adm2:KEN.1.1_1",
+            assignment_status=MembershipStatus.UNMATCHED_OUTSIDE,
+            assignment_method="spatial_foundation.assign_points",
+        )
+
+    with pytest.raises(ValueError, match="MembershipStatus"):
+        SurveyGeographyLink(
+            survey_id="dhs-ken-2022",
+            source_object_id="cluster-17",
+            source_object_type="survey_cluster",
+            geography=geography,
+            geo_uid=None,
+            assignment_status="survey_specific_guess",
+            assignment_method="local_guess",
+        )
 
 
 def test_variable_metadata_keeps_temporal_semantics_explicit_and_unknown_by_default() -> None:
@@ -166,31 +222,125 @@ def test_variable_metadata_keeps_temporal_semantics_explicit_and_unknown_by_defa
     assert unknown.temporal_semantics is TemporalSemantics.UNKNOWN
 
 
-def test_two_source_files_can_belong_to_one_survey() -> None:
-    first = SurveyFileLink(
+def test_one_survey_can_link_files_from_distinct_source_snapshots() -> None:
+    survey = SurveyCatalogEntry(
         survey_id="dhs-ken-2022",
-        source_snapshot_id="snapshot-dhs-ken-2022",
-        source_file=SourceFileRef(
-            path="source/household_records.dat",
-            sha256="a" * 64,
-            size_bytes=1200,
-        ),
+        source_family="dhs",
+        country_iso3="KEN",
+        survey_year=2022,
+        survey_phase="phase-8",
+        release="2022-survey",
+    )
+    household_file = SourceFileRef(
+        path="source/household_records.dat",
+        sha256="a" * 64,
+        size_bytes=1200,
+    )
+    gps_file = SourceFileRef(
+        path="source/gps_clusters.shp",
+        sha256="b" * 64,
+        size_bytes=2400,
+    )
+    hr_snapshot = SourceSnapshotRef(
+        source="dhs_hr",
+        release="hr-release",
+        snapshot_id="snapshot-dhs-ken-2022-hr",
+        files=(household_file,),
+    )
+    gps_snapshot = SourceSnapshotRef(
+        source="dhs_gps",
+        release="gps-release",
+        snapshot_id="snapshot-dhs-ken-2022-gps",
+        files=(gps_file,),
+    )
+    hr_link = SurveyFileLink(
+        survey_id=survey.survey_id,
+        source_snapshot_id=hr_snapshot.snapshot_id,
+        source_file=household_file,
         instrument="household-records",
     )
-    second = SurveyFileLink(
-        survey_id="dhs-ken-2022",
-        source_snapshot_id="snapshot-dhs-ken-2022",
-        source_file=SourceFileRef(
-            path="source/person_records.dat",
-            sha256="b" * 64,
-            size_bytes=2400,
-        ),
-        instrument="person-records",
+    gps_link = SurveyFileLink(
+        survey_id=survey.survey_id,
+        source_snapshot_id=gps_snapshot.snapshot_id,
+        source_file=gps_file,
+        instrument="gps-clusters",
     )
 
-    assert first.survey_id == second.survey_id
-    assert first.source_file.path != second.source_file.path
-    assert first.instrument != second.instrument
+    validate_survey_file_link(survey, hr_link, hr_snapshot)
+    validate_survey_file_link(survey, gps_link, gps_snapshot)
+
+    assert hr_link.survey_id == gps_link.survey_id == survey.survey_id
+    assert hr_link.source_snapshot_id != gps_link.source_snapshot_id
+    assert not hasattr(survey, "source_snapshot_id")
+
+
+def test_survey_file_link_fails_if_file_is_not_in_declared_snapshot() -> None:
+    survey = SurveyCatalogEntry(
+        survey_id="dhs-ken-2022",
+        source_family="dhs",
+        country_iso3="KEN",
+        survey_year=2022,
+        release="2022-survey",
+    )
+    registered = SourceFileRef(
+        path="source/hr.dat",
+        sha256="c" * 64,
+        size_bytes=1200,
+    )
+    different = SourceFileRef(
+        path="source/ge.dat",
+        sha256="d" * 64,
+        size_bytes=800,
+    )
+    snapshot = SourceSnapshotRef(
+        source="dhs_hr",
+        release="hr-release",
+        snapshot_id="snapshot-hr",
+        files=(registered,),
+    )
+    link = SurveyFileLink(
+        survey_id=survey.survey_id,
+        source_snapshot_id=snapshot.snapshot_id,
+        source_file=different,
+        instrument="gps",
+    )
+
+    with pytest.raises(ValueError, match="not a member"):
+        validate_survey_file_link(survey, link, snapshot)
+
+
+def test_normalized_weight_requires_explicit_transformation_provenance() -> None:
+    with pytest.raises(ValueError, match="normalization_method"):
+        SurveyDesignRecord(
+            survey_id="dhs-ken-2022",
+            observation_id="household-1",
+            natural_grain="household",
+            source_weight_variable="hv005",
+            source_weight_value=153284,
+            normalized_weight_value=0.153284,
+        )
+
+    record = SurveyDesignRecord(
+        survey_id="dhs-ken-2022",
+        observation_id="household-1",
+        natural_grain="household",
+        source_weight_variable="hv005",
+        source_weight_value=153284,
+        normalized_weight_value=0.153284,
+        weight_normalization_method="divide source weight by 1_000_000",
+    )
+    assert math.isclose(record.normalized_weight_value or 0.0, 0.153284)
+
+
+def test_catalog_rejects_noncanonical_country_identity() -> None:
+    with pytest.raises(ValueError, match="uppercase ISO"):
+        SurveyCatalogEntry(
+            survey_id="dhs-ken-2022",
+            source_family="dhs",
+            country_iso3="ken",
+            survey_year=2022,
+            release="2022-survey",
+        )
 
 
 def test_substrate_has_no_experiment_role_fields() -> None:
@@ -205,6 +355,13 @@ def test_substrate_has_no_experiment_role_fields() -> None:
         )
         for field in fields(model)
     }
-    forbidden = {"outcome", "treatment", "control", "covariate", "regression_weight", "estimator"}
+    forbidden = {
+        "outcome",
+        "treatment",
+        "control",
+        "covariate",
+        "regression_weight",
+        "estimator",
+    }
 
     assert field_names.isdisjoint(forbidden)
