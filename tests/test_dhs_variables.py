@@ -116,7 +116,7 @@ def test_registry_phase_mismatch_fails_instead_of_assuming_cross_phase_comparabi
         )
 
 
-def test_measurement_contracts_have_no_experiment_role():
+def test_measurement_contracts_contain_no_experiment_role_vocabulary():
     result = build_dhs_household_measurements(
         _hr(), survey=_survey(), hr_dataset=_hr_dataset()
     )
@@ -126,7 +126,7 @@ def test_measurement_contracts_have_no_experiment_role():
         "dhs.household.wealth_quintile",
         "dhs.household.drinking_water_source_code",
     }
-    assert all(contract.parameters["experiment_role"] is None for contract in result.contracts)
+    assert all("experiment_role" not in contract.parameters for contract in result.contracts)
     assert all(contract.coverage.absent_row_semantics == "not_observed" for contract in result.contracts)
     assert all(contract.output_grain.keys == ("source_row_id",) for contract in result.contracts)
 
@@ -139,6 +139,22 @@ def test_duplicate_household_id_does_not_destroy_physical_measurement_identity()
 
     assert not result.frame[["source_row_id", "measurement_id"]].duplicated().any()
     assert result.frame["household_id"].value_counts().max() > 1
+
+
+def test_non_default_dataframe_index_cannot_misalign_measurement_values():
+    hr = _hr().copy()
+    hr.index = [10, 20, 30, 40]
+
+    result = build_dhs_household_measurements(hr, survey=_survey(), hr_dataset=_hr_dataset())
+    electricity = _measurement(result, "dhs.household.electricity_access")
+
+    assert electricity["source_row_id"].tolist() == ["row-1", "row-2", "row-3", "row-4"]
+    assert electricity["measurement_status"].tolist() == [
+        "observed",
+        "observed",
+        "source_missing_code",
+        "unmapped_source_code",
+    ]
 
 
 def test_custom_definition_without_codebook_provenance_is_rejected():
@@ -179,9 +195,10 @@ def test_materialization_requires_exact_hashed_hr_silver(tmp_path: Path):
     assert output.exists()
     assert len(pd.read_parquet(output)) == len(_hr()) * len(DHS_VII_STANDARD_HR_REGISTRY)
     assert manifest.inputs == (dataset,)
+    assert "experiment_roles" not in manifest.parameters
     assert output_dataset.content_sha256 is not None
     assert output_dataset.grain.keys == ("source_row_id", "measurement_id")
-    assert result.registry_sha256 in output_dataset.version
+    assert result.registry_sha256[:12] in output_dataset.version
 
     hr_path.write_bytes(hr_path.read_bytes() + b"tamper")
     with pytest.raises(ValueError, match="do not match"):
