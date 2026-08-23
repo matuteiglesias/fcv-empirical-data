@@ -324,6 +324,7 @@ def build_dhs_household_measurements(
     survey_ids = set(hr["survey_id"].astype("string").dropna())
     if survey_ids != {survey.survey_id}:
         raise ValueError("HR Silver survey_id does not match the requested SurveyCatalogEntry")
+    hr = hr.reset_index(drop=True)
 
     pieces: list[pd.DataFrame] = []
     status_counts: dict[str, int] = {}
@@ -375,7 +376,6 @@ def build_dhs_household_measurements(
                 "temporal_semantics": definition.temporal_semantics.value,
                 "comparability_status": definition.comparability_status,
                 "codebook_provenance": dict(definition.codebook_provenance),
-                "experiment_role": None,
             },
         )
         for definition in definitions
@@ -409,8 +409,8 @@ def build_dhs_household_measurements(
         QAResult(
             check_id="dhs.variables.experiment_firewall",
             state="GREEN",
-            message="registry definitions create empirical meanings only; experiment role is absent",
-            metrics={"experiment_roles_assigned": 0},
+            message="registry definitions create reusable empirical meanings only",
+            metrics={"scientific_roles_assigned": 0},
         ),
     )
     return DhsHouseholdMeasurementResult(
@@ -493,7 +493,6 @@ def materialize_dhs_household_measurements(
             "measurement_ids": [item.measurement_id for item in result.definitions],
             "aggregation": None,
             "imputation": None,
-            "experiment_roles": None,
         },
         code_commit=code_commit,
         qa=result.qa,
