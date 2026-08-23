@@ -14,6 +14,12 @@ from .annotation_candidates import (
     materialize_annotation_candidates,
 )
 from .common import InvestmentMaterializationResult
+from .geogcdf import (
+    GeoGCDFSilverResult,
+    materialize_geogcdf_silver,
+    normalize_geogcdf_projects,
+    register_geogcdf_snapshot,
+)
 from .worldbank import (
     WorldBankExtraction,
     flatten_worldbank_record,
@@ -24,6 +30,7 @@ from .worldbank import (
 
 __all__ = [
     "AidDataExtraction",
+    "GeoGCDFSilverResult",
     "InvestmentMaterializationResult",
     "SilverTableInput",
     "WorldBankExtraction",
@@ -35,7 +42,10 @@ __all__ = [
     "load_worldbank_pages",
     "materialize_aiddata_silver",
     "materialize_annotation_candidates",
+    "materialize_geogcdf_silver",
     "materialize_worldbank_silver",
+    "normalize_geogcdf_projects",
     "register_aiddata_snapshot",
+    "register_geogcdf_snapshot",
     "register_worldbank_snapshot",
 ]
