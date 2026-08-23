@@ -21,6 +21,7 @@ def _frames():
     survey_id = _survey().survey_id
     hr = pd.DataFrame(
         {
+            "source_row_id": ["hr-row-1", "hr-row-2", "hr-row-3"],
             "survey_id": [survey_id, survey_id, survey_id],
             "household_id": ["001001", "001002", "002001"],
             "cluster_id": ["1", "1", "2"],
@@ -29,6 +30,7 @@ def _frames():
     )
     gps = pd.DataFrame(
         {
+            "cluster_row_id": ["gps-row-1", "gps-row-2"],
             "survey_id": [survey_id, survey_id],
             "cluster_id": ["1", "2"],
             "dhsid": ["ZZ2020DHS00000001", "ZZ2020DHS00000002"],
@@ -81,9 +83,11 @@ def test_one_catalog_connects_households_gps_and_gc_without_joining_grains():
     assert report.summary["hr_gc_overlap"] == 2
     assert report.summary["gps_gc_overlap"] == 2
     assert report.summary["hr_household_rows"] == 3
+    assert report.summary["dataset_refs_checked"] == ("gc", "gps", "hr")
     assert len(report.cluster_support) == 2
     assert report.cluster_support[["in_hr", "in_gps", "in_gc"]].all(axis=None)
     assert _qa(report, "dhs.integration.survey_identity").state == "GREEN"
+    assert _qa(report, "dhs.integration.dataset_grain").state == "GREEN"
     assert _qa(report, "dhs.integration.cluster_support").state == "GREEN"
 
 
@@ -103,6 +107,7 @@ def test_source_only_clusters_remain_visible_instead_of_inner_join_disappearing(
             gps,
             pd.DataFrame(
                 {
+                    "cluster_row_id": ["gps-row-3"],
                     "survey_id": [_survey().survey_id],
                     "cluster_id": ["3"],
                     "dhsid": ["ZZ2020DHS00000003"],
@@ -154,5 +159,35 @@ def test_dataset_role_cannot_masquerade_as_another_product():
             hr=hr,
             gps=gps,
             gc=gc,
-            datasets={"gps": _dataset("surveys.dhs.hr_households", "source_row_id")},
+            datasets={"gps": _dataset("surveys.dhs.hr_households", "cluster_row_id")},
         )
+
+
+def test_declared_dataset_grain_must_be_unique_in_actual_product():
+    hr, gps, gc = _frames()
+    hr.loc[1, "household_id"] = hr.loc[0, "household_id"]
+
+    with pytest.raises(ValueError, match="grain does not uniquely identify"):
+        build_dhs_survey_integration_report(
+            survey=_survey(),
+            hr=hr,
+            gps=gps,
+            gc=gc,
+            datasets={
+                "hr": _dataset(
+                    "surveys.dhs.hr_households", "survey_id", "household_id"
+                )
+            },
+        )
+
+
+def test_missing_cluster_identity_is_visible_not_dropped():
+    hr, gps, gc = _frames()
+    hr.loc[2, "cluster_id"] = pd.NA
+
+    report = build_dhs_survey_integration_report(survey=_survey(), hr=hr, gps=gps, gc=gc)
+
+    assert report.summary["hr_missing_cluster_rows"] == 1
+    support = _qa(report, "dhs.integration.cluster_support")
+    assert support.state == "YELLOW"
+    assert support.metrics["missing_cluster_identity_rows"] == 1
