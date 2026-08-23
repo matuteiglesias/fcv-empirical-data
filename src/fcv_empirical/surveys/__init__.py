@@ -17,7 +17,8 @@ from .dhs_gps import (
 )
 from .dhs_gps_pipeline import (
     materialize_dhs_gps_silver,
-    materialize_dhs_reported_coordinate_membership,)
+    materialize_dhs_reported_coordinate_membership,
+)
 from .dhs_hr import (
     DHS_HR_RECODE,
     DHS_SOURCE,
@@ -34,24 +35,37 @@ from .dhs_hr import (
     normalize_dhs_hr,
     register_dhs_hr_snapshot,
 )
+from .dhs_integration import DhsSurveyIntegrationReport, build_dhs_survey_integration_report
+from .dhs_variables import (
+    DHS_VII_STANDARD_HR_REGISTRY,
+    DhsHouseholdMeasurementResult,
+    DhsVariableDefinition,
+    build_dhs_household_measurements,
+    materialize_dhs_household_measurements,
+    registry_sha256,
+)
 from .geography import SurveyGeographyLink
 from .variables import SurveyVariableMetadata, TemporalSemantics
 
 __all__ = [
     "DHS_GPS_SOURCE",
+    "DHS_HR_RECODE",
+    "DHS_SOURCE",
+    "DHS_VII_STANDARD_HR_REGISTRY",
+    "HOUSEHOLD_GRAIN",
     "POSSIBLE_GEOGRAPHY_UNDER_DISPLACEMENT",
     "REPORTED_COORDINATE_MEMBERSHIP",
+    "STANDARD_DHS_HR_COLUMNS",
     "DhsDisplacementPolicy",
     "DhsGpsLinkageResult",
     "DhsGpsSilverResult",
-    "DhsReportedMembershipResult",
-    "DHS_HR_RECODE",
-    "DHS_SOURCE",
-    "HOUSEHOLD_GRAIN",
-    "STANDARD_DHS_HR_COLUMNS",
+    "DhsHouseholdMeasurementResult",
     "DhsHrColumnMap",
     "DhsHrMetadata",
     "DhsHrSilverResult",
+    "DhsReportedMembershipResult",
+    "DhsSurveyIntegrationReport",
+    "DhsVariableDefinition",
     "ObservationGrain",
     "SurveyCatalogEntry",
     "SurveyDesignRecord",
@@ -61,18 +75,22 @@ __all__ = [
     "TemporalSemantics",
     "WeightValue",
     "assign_dhs_reported_coordinate_membership",
-    "materialize_dhs_gps_silver",
-    "materialize_dhs_reported_coordinate_membership",
-    "normalize_dhs_gps_clusters",
-    "register_dhs_gps_snapshot",
-    "validate_dhs_gps_linkage",
+    "build_dhs_household_measurements",
     "build_dhs_hr_file_link",
     "build_dhs_survey_catalog",
     "build_dhs_survey_id",
+    "build_dhs_survey_integration_report",
     "iter_dhs_hr_design_records",
+    "materialize_dhs_gps_silver",
+    "materialize_dhs_household_measurements",
     "materialize_dhs_hr_silver",
+    "materialize_dhs_reported_coordinate_membership",
+    "normalize_dhs_gps_clusters",
     "normalize_dhs_hr",
+    "register_dhs_gps_snapshot",
     "register_dhs_hr_snapshot",
+    "registry_sha256",
+    "validate_dhs_gps_linkage",
     "validate_observation_grain",
     "validate_survey_file_link",
 ]
