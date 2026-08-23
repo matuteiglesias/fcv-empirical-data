@@ -404,12 +404,7 @@ def normalize_dhs_hr(
     envelope["source_household_weight"] = source[source_columns["source_weight"]].copy()
     envelope["country"] = metadata.country
     envelope["country_iso3"] = metadata.country_iso3
-    envelope["household_observation_id"] = [
-        f"{catalog.survey_id}:{household_id}" if pd.notna(household_id) else source_row_id
-        for household_id, source_row_id in zip(
-            envelope["household_id"], envelope["source_row_id"], strict=True
-        )
-    ]
+    envelope["household_observation_id"] = envelope["source_row_id"]
 
     frame = pd.concat([envelope, source], axis=1)
     schema_sha256 = _schema_hash(source)
@@ -472,10 +467,10 @@ def _dataset_ref(snapshot: SourceSnapshotRef) -> DatasetRef:
     return DatasetRef(
         dataset_id="surveys.dhs.hr_households",
         version=snapshot.snapshot_id,
-        schema_version="dhs-hr-household-silver-v1",
+        schema_version="dhs-hr-household-silver-v2",
         layer=DataLayer.SILVER,
         authority=AuthorityLevel.L3_REBUILT,
-        grain=GrainSpec(keys=("survey_id", "household_id")),
+        grain=GrainSpec(keys=("source_row_id",)),
     )
 
 
@@ -542,6 +537,11 @@ def materialize_dhs_hr_silver(
             "source_file_name": metadata.source_file_name,
             "source_schema_sha256": silver.schema_sha256,
             "source_column_map": silver.source_columns,
+            "physical_row_key": "source_row_id",
+            "natural_household_key": ["survey_id", "household_id"],
+            "natural_household_key_semantics": (
+                "source identity audited for missingness and duplicates; not assumed unique"
+            ),
             "source_weight_transformation": None,
             "aggregation": None,
         },
