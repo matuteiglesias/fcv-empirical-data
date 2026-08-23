@@ -56,3 +56,21 @@ def test_period_assignment_uses_shared_period_scheme():
         t2.frame.loc[t2.frame.event_row_id == "e4", "period_assignment_status"].item()
         == "missing_or_invalid_date"
     )
+
+
+def test_geography_preserves_overlap_ambiguity():
+    geography = GeographySpec(provider="gadm", version="4.1", scheme="admin", level="2")
+    polygons = gpd.GeoDataFrame(
+        {"geo_uid": ["g1", "g_overlap"], "geometry_role": ["analytical", "analytical"]},
+        geometry=[
+            Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+            Polygon([(0.25, 0.25), (0.75, 0.25), (0.75, 0.75), (0.25, 0.75)]),
+        ],
+        crs="EPSG:4326",
+    )
+    silver = _silver().iloc[[0]].copy()
+
+    result = assign_acled_geography(silver, polygons, geography=geography)
+
+    assert set(result.frame["geo_uid"]) == {"g1", "g_overlap"}
+    assert set(result.frame["assignment_status"]) == {"ambiguous_multiple"}
