@@ -5,6 +5,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from empirical_contracts import (
     GrainSpec,
     QAResult,
     RunManifest,
+    SourceFileRef,
     SourceSnapshotRef,
 )
 from spatial_foundation import DataRoot, register_external_snapshot, sha256_file
@@ -28,7 +30,10 @@ from .variables import SurveyVariableMetadata, TemporalSemantics
 DHS_GC_SOURCE = "dhs_gc"
 DHS_GC_ORIGIN = "DHS Program Geospatial Covariates"
 RAW_PREFIX = "source__"
-CLUSTER_GRAIN = "cluster"
+CLUSTER_GRAIN = "survey_cluster"
+DHS_GC_ID_VARIABLES = frozenset({"dhsid", "dhsclust"})
+MIN_PLAUSIBLE_SOURCE_YEAR = 1800
+MAX_PLAUSIBLE_SOURCE_YEAR = 2200
 
 
 @dataclass(frozen=True)
@@ -47,18 +52,27 @@ class GCTemporalRule:
     documented_time_token: str | None = None
     ignore_case: bool = False
     codebook_provenance: Mapping[str, str] = field(default_factory=dict)
+    documented_time: date | None = None
 
     def __post_init__(self) -> None:
         if not self.source_variable_pattern or not self.source_variable_pattern.strip():
             raise ValueError("source_variable_pattern must be non-empty")
         try:
-            re.compile(self.source_variable_pattern)
+            compiled = re.compile(self.source_variable_pattern)
         except re.error as error:
             raise ValueError(f"invalid source_variable_pattern: {error}") from error
         if self.year_group is not None and self.documented_year is not None:
             raise ValueError("year_group and documented_year are mutually exclusive")
-        if self.documented_year is not None and not 1 <= self.documented_year <= 9999:
-            raise ValueError("documented_year must be a valid calendar year")
+        if isinstance(self.year_group, str) and self.year_group not in compiled.groupindex:
+            raise ValueError(
+                f"year_group {self.year_group!r} is absent from pattern "
+                f"{self.source_variable_pattern!r}"
+            )
+        if self.documented_year is not None and not _plausible_year(self.documented_year):
+            raise ValueError(
+                "documented_year must be a plausible source year between "
+                f"{MIN_PLAUSIBLE_SOURCE_YEAR} and {MAX_PLAUSIBLE_SOURCE_YEAR}"
+            )
         if self.documented_time_token is not None and not self.documented_time_token.strip():
             raise ValueError("documented_time_token must be non-empty when supplied")
 
@@ -74,6 +88,8 @@ class GCVariableTemporalMetadata:
     source_time_token: str | None
     measurement_year: int | None
     codebook_provenance: Mapping[str, str]
+    measurement_time: date | None = None
+    parse_status: str = "registered"
 
 
 @dataclass(frozen=True)
@@ -111,15 +127,62 @@ class DHSGCMeasurementResult:
     measurement_spec_sha256: str
 
 
+def _require_dhs_survey(survey: SurveyCatalogEntry) -> None:
+    if survey.source_family.casefold() != "dhs":
+        raise ValueError("DHS GC requires a DHS SurveyCatalogEntry")
+
+
+def _plausible_year(value: int) -> bool:
+    return MIN_PLAUSIBLE_SOURCE_YEAR <= value <= MAX_PLAUSIBLE_SOURCE_YEAR
+
+
+def _is_gc_identity_variable(source_variable: str) -> bool:
+    return source_variable.casefold() in DHS_GC_ID_VARIABLES
+
+
+def _normalize_paths(
+    source_paths: str | Path | Iterable[str | Path],
+) -> tuple[Path, ...]:
+    if isinstance(source_paths, (str, Path)):
+        values = (source_paths,)
+    else:
+        values = tuple(source_paths)
+    if not values:
+        raise ValueError("at least one DHS GC release file is required")
+    paths = tuple(Path(value).expanduser().resolve() for value in values)
+    if len(set(paths)) != len(paths):
+        raise ValueError("DHS GC release files must be unique")
+    return paths
+
+
 def register_dhs_gc_snapshot(
-    source_path: str | Path,
+    source_path: str | Path | Iterable[str | Path],
     *,
     release: str,
     origin: str = DHS_GC_ORIGIN,
 ) -> SourceSnapshotRef:
-    """Register one externally stored DHS GC release file without copying it."""
-    snapshot = register_external_snapshot(DHS_GC_SOURCE, release, [source_path])
+    """Register externally stored DHS GC release files without copying them."""
+    snapshot = register_external_snapshot(
+        DHS_GC_SOURCE,
+        release,
+        list(_normalize_paths(source_path)),
+    )
     return snapshot.model_copy(update={"origin": origin})
+
+
+def _snapshot_file_for_path(
+    snapshot: SourceSnapshotRef,
+    source_path: str | Path,
+) -> SourceFileRef:
+    resolved = Path(source_path).expanduser().resolve()
+    matches = [
+        source_file
+        for source_file in snapshot.files
+        if Path(source_file.path).expanduser().resolve() == resolved
+    ]
+    if len(matches) != 1:
+        raise ValueError("DHS GC source_path must be represented exactly once in SourceSnapshotRef")
+    return matches[0]
 
 
 def resolve_dhs_gc_file_link(
@@ -128,18 +191,13 @@ def resolve_dhs_gc_file_link(
     source_path: str | Path,
 ) -> SurveyFileLink:
     """Resolve one GC file explicitly to SurveyCatalog instead of inferring survey identity."""
-    resolved = Path(source_path).expanduser().resolve()
-    matches = [
-        source_file
-        for source_file in snapshot.files
-        if Path(source_file.path).expanduser().resolve() == resolved
-    ]
-    if len(matches) != 1:
-        raise ValueError("DHS GC source_path must be represented exactly once in SourceSnapshotRef")
+    _require_dhs_survey(survey)
+    if snapshot.source != DHS_GC_SOURCE:
+        raise ValueError(f"DHS GC file links require snapshot source {DHS_GC_SOURCE!r}")
     link = SurveyFileLink(
         survey_id=survey.survey_id,
         source_snapshot_id=snapshot.snapshot_id,
-        source_file=matches[0],
+        source_file=_snapshot_file_for_path(snapshot, source_path),
         instrument="GC",
     )
     validate_survey_file_link(survey, link, snapshot)
@@ -147,15 +205,9 @@ def resolve_dhs_gc_file_link(
 
 
 def _validate_snapshot_source(snapshot: SourceSnapshotRef, source_path: str | Path) -> None:
+    source_file = _snapshot_file_for_path(snapshot, source_path)
     resolved = Path(source_path).expanduser().resolve()
-    matches = [
-        source_file
-        for source_file in snapshot.files
-        if Path(source_file.path).expanduser().resolve() == resolved
-    ]
-    if len(matches) != 1:
-        raise ValueError("DHS GC source_path must be represented exactly once in SourceSnapshotRef")
-    if sha256_file(resolved) != matches[0].sha256:
+    if sha256_file(resolved) != source_file.sha256:
         raise ValueError("DHS GC source file changed after snapshot registration")
 
 
@@ -181,6 +233,17 @@ def _schema_sha256(raw: pd.DataFrame) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def _find_column(columns: Sequence[str], name: str) -> str | None:
+    matches = [column for column in columns if column.casefold() == name.casefold()]
+    if len(matches) > 1:
+        raise ValueError(f"DHS GC input has case-insensitive duplicate {name} fields")
+    return matches[0] if matches else None
+
+
+def _identity_series(raw: pd.DataFrame, column: str) -> pd.Series:
+    return raw[column].astype("string").str.strip().replace("", pd.NA)
+
+
 def normalize_dhs_gc_clusters(
     raw: pd.DataFrame,
     *,
@@ -189,13 +252,17 @@ def normalize_dhs_gc_clusters(
     cluster_column: str = "DHSID",
 ) -> DHSGCClusterSilverResult:
     """Build source-native cluster Silver without aggregation or value imputation."""
+    _require_dhs_survey(survey)
+    if snapshot.source != DHS_GC_SOURCE:
+        raise ValueError(f"DHS GC Silver requires snapshot source {DHS_GC_SOURCE!r}")
     source_columns = [str(column) for column in raw.columns]
     if len(set(source_columns)) != len(source_columns):
         raise ValueError("DHS GC input has duplicate column labels")
-    if cluster_column not in raw.columns:
+    resolved_cluster_column = _find_column(source_columns, cluster_column)
+    if resolved_cluster_column is None:
         raise ValueError(f"DHS GC input is missing cluster identity column {cluster_column!r}")
 
-    cluster_id = raw[cluster_column].astype("string").str.strip().replace("", pd.NA)
+    cluster_id = _identity_series(raw, resolved_cluster_column)
     missing_cluster_ids = int(cluster_id.isna().sum())
     duplicate_cluster_rows = int(cluster_id[cluster_id.notna()].duplicated(keep=False).sum())
     if missing_cluster_ids:
@@ -210,6 +277,12 @@ def normalize_dhs_gc_clusters(
     frame = pd.DataFrame(index=raw.index)
     frame["survey_id"] = survey.survey_id
     frame["cluster_id"] = cluster_id
+    dhsid_column = _find_column(source_columns, "DHSID")
+    dhsclust_column = _find_column(source_columns, "DHSCLUST")
+    if dhsid_column is not None:
+        frame["dhsid"] = _identity_series(raw, dhsid_column)
+    if dhsclust_column is not None:
+        frame["dhsclust"] = _identity_series(raw, dhsclust_column)
     frame["source_release"] = snapshot.release
     frame["source_snapshot_id"] = snapshot.snapshot_id
     frame = pd.concat([frame.reset_index(drop=True), source_native.reset_index(drop=True)], axis=1)
@@ -224,11 +297,13 @@ def normalize_dhs_gc_clusters(
         QAResult(
             check_id="dhs_gc.clusters.identity",
             state="GREEN",
-            message="survey and source cluster identities define the durable cluster grain",
+            message="survey and DHS source identities define the durable cluster grain",
             metrics={
                 "cluster_count": len(frame),
                 "missing_cluster_ids": 0,
                 "duplicate_cluster_rows": 0,
+                "dhsid_present": dhsid_column is not None,
+                "dhsclust_present": dhsclust_column is not None,
             },
         ),
         QAResult(
@@ -242,7 +317,7 @@ def normalize_dhs_gc_clusters(
         frame=frame,
         qa=qa,
         raw_column_map=raw_column_map,
-        cluster_column=cluster_column,
+        cluster_column=resolved_cluster_column,
         schema_sha256=_schema_sha256(raw),
     )
 
@@ -250,12 +325,12 @@ def normalize_dhs_gc_clusters(
 def _parse_rule_year(
     rule: GCTemporalRule,
     match: re.Match[str],
-) -> tuple[str | None, int | None, bool]:
+) -> tuple[str | None, int | None, bool, str]:
     if rule.documented_year is not None:
         token = rule.documented_time_token or str(rule.documented_year)
-        return token, rule.documented_year, False
+        return token, rule.documented_year, False, "registered_year"
     if rule.year_group is None:
-        return rule.documented_time_token, None, False
+        return rule.documented_time_token, None, False, "registered"
     try:
         token = match.group(rule.year_group)
     except (IndexError, KeyError) as error:
@@ -267,10 +342,10 @@ def _parse_rule_year(
     try:
         year = int(token)
     except ValueError:
-        return token, None, True
-    if not 1 <= year <= 9999:
-        return token, None, True
-    return token, year, False
+        return token, None, True, "impossible_year"
+    if not _plausible_year(year):
+        return token, None, True, "impossible_year"
+    return token, year, False, "parsed_year"
 
 
 def resolve_gc_temporal_metadata(
@@ -294,14 +369,18 @@ def resolve_gc_temporal_metadata(
     conflicts: list[str] = []
 
     for source_variable in source_variables:
-        matches = [(rule, rule.match(source_variable)) for rule in rule_set]
-        matched = [(rule, match) for rule, match in matches if match is not None]
+        matched = [
+            (rule, match)
+            for rule in rule_set
+            if (match := rule.match(source_variable)) is not None
+        ]
+        measurement_time: date | None = None
         if len(matched) == 1:
             rule, match = matched[0]
-            assert match is not None
-            token, measurement_year, impossible = _parse_rule_year(rule, match)
+            token, measurement_year, impossible, parse_status = _parse_rule_year(rule, match)
             semantics = rule.temporal_semantics
             provenance = dict(rule.codebook_provenance)
+            measurement_time = rule.documented_time
             if measurement_year is not None:
                 explicit_year.append(source_variable)
             if impossible:
@@ -311,12 +390,14 @@ def resolve_gc_temporal_metadata(
             token = None
             measurement_year = None
             provenance = {}
+            parse_status = "conflict"
             conflicts.append(source_variable)
         else:
             semantics = TemporalSemantics.UNKNOWN
             token = None
             measurement_year = None
             provenance = {}
+            parse_status = "unknown"
 
         variable_metadata.append(
             SurveyVariableMetadata(
@@ -339,6 +420,8 @@ def resolve_gc_temporal_metadata(
                 source_time_token=token,
                 measurement_year=measurement_year,
                 codebook_provenance=provenance,
+                measurement_time=measurement_time,
+                parse_status=parse_status,
             )
         )
 
@@ -425,6 +508,9 @@ def _registry_sha256(rules: Iterable[GCTemporalRule]) -> str:
         item["temporal_semantics"] = rule.temporal_semantics.value
         item["year_group"] = str(rule.year_group) if rule.year_group is not None else None
         item["codebook_provenance"] = dict(sorted(rule.codebook_provenance.items()))
+        item["documented_time"] = (
+            rule.documented_time.isoformat() if rule.documented_time is not None else None
+        )
         payload.append(item)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -450,8 +536,20 @@ def _coverage_from_long(frame: pd.DataFrame) -> pd.DataFrame:
     summary["missing_cluster_count"] = (
         summary["cluster_count"] - summary["observed_cluster_count"]
     )
+    summary["availability_fraction"] = (
+        summary["observed_cluster_count"] / summary["cluster_count"]
+    )
     summary["coverage_scope"] = "dhs_cluster_measurement_availability"
+    summary["absent_row_semantics"] = "not_observed"
+    summary["missing_value_semantics"] = "missing_source_measurement"
     return summary
+
+
+def _measurement_identity_columns(frame: pd.DataFrame) -> list[str]:
+    columns = ["survey_id", "cluster_id"]
+    columns.extend(name for name in ("dhsid", "dhsclust") if name in frame.columns)
+    columns.extend(["source_release", "source_snapshot_id"])
+    return columns
 
 
 def build_dhs_gc_measurements(
@@ -462,20 +560,27 @@ def build_dhs_gc_measurements(
     variable_columns: Iterable[str] | None = None,
 ) -> DHSGCMeasurementResult:
     """Build a derived long cluster-measurement view without inventing panel semantics."""
+    _require_dhs_survey(survey)
     rules = tuple(temporal_rules)
     if variable_columns is None:
         selected = [
             source_variable
             for source_variable in silver.raw_column_map
             if source_variable != silver.cluster_column
+            and not _is_gc_identity_variable(source_variable)
         ]
     else:
         selected = list(variable_columns)
         unknown = [name for name in selected if name not in silver.raw_column_map]
         if unknown:
             raise ValueError("unknown DHS GC source variable(s): " + ", ".join(unknown))
-        if silver.cluster_column in selected:
-            raise ValueError("cluster identity cannot be emitted as a GC covariate measurement")
+        identity = [name for name in selected if _is_gc_identity_variable(name)]
+        if identity or silver.cluster_column in selected:
+            rejected = identity or [silver.cluster_column]
+            raise ValueError(
+                "DHS GC identity columns cannot be emitted as covariate measurements: "
+                + ", ".join(rejected)
+            )
         if len(set(selected)) != len(selected):
             raise ValueError("variable_columns contains duplicates")
 
@@ -491,50 +596,60 @@ def build_dhs_gc_measurements(
     )
     temporal_by_variable = {item.source_variable: item for item in temporal_metadata}
 
+    identity_columns = _measurement_identity_columns(silver.frame)
     pieces: list[pd.DataFrame] = []
     for source_variable in selected:
         source_column = silver.raw_column_map[source_variable]
         values = silver.frame[source_column]
         item = temporal_by_variable[source_variable]
-        piece = silver.frame[
-            ["survey_id", "cluster_id", "source_release", "source_snapshot_id"]
-        ].copy()
+        piece = silver.frame[identity_columns].copy()
         piece["source_variable"] = source_variable
         piece["source_value"] = values.astype("string")
         piece["source_value_type"] = str(values.dtype)
         piece["source_time_token"] = item.source_time_token
         piece["temporal_semantics"] = item.temporal_semantics.value
         piece["measurement_year"] = item.measurement_year
+        piece["measurement_time"] = (
+            pd.Timestamp(item.measurement_time) if item.measurement_time is not None else pd.NaT
+        )
+        piece["temporal_parse_status"] = item.parse_status
         pieces.append(piece)
 
     columns = [
-        "survey_id",
-        "cluster_id",
+        *identity_columns,
         "source_variable",
         "source_value",
         "source_value_type",
         "source_time_token",
         "temporal_semantics",
         "measurement_year",
-        "source_release",
-        "source_snapshot_id",
+        "measurement_time",
+        "temporal_parse_status",
     ]
     if pieces:
         frame = pd.concat(pieces, ignore_index=True)[columns]
         frame["measurement_year"] = pd.array(frame["measurement_year"], dtype="Int64")
+        frame["source_time_token"] = frame["source_time_token"].astype("string")
     else:
         frame = pd.DataFrame({column: pd.Series(dtype="object") for column in columns})
         frame["measurement_year"] = pd.Series(dtype="Int64")
+        frame["measurement_time"] = pd.Series(dtype="datetime64[ns]")
 
-    coverage = _coverage_from_long(frame) if not frame.empty else pd.DataFrame(
-        columns=[
-            "survey_id",
-            "source_variable",
-            "cluster_count",
-            "observed_cluster_count",
-            "missing_cluster_count",
-            "coverage_scope",
-        ]
+    coverage_columns = [
+        "survey_id",
+        "source_variable",
+        "cluster_count",
+        "observed_cluster_count",
+        "missing_cluster_count",
+        "availability_fraction",
+        "coverage_scope",
+        "absent_row_semantics",
+        "missing_value_semantics",
+    ]
+    coverage = (
+        _coverage_from_long(frame)
+        if not frame.empty
+        else pd.DataFrame(columns=coverage_columns)
     )
     missing_measurements = int(frame["source_value"].isna().sum()) if not frame.empty else 0
     qa = (
@@ -552,8 +667,14 @@ def build_dhs_gc_measurements(
         QAResult(
             check_id="dhs_gc.measurements.cluster_conditioning",
             state="GREEN",
-            message="long measurements retain survey and cluster identity without GID aggregation",
-            metrics={"gid_aggregation_count": 0},
+            message=(
+                "long measurements retain DHS survey/cluster identity; identifier fields are not "
+                "covariates and no GID aggregation occurs"
+            ),
+            metrics={
+                "gid_aggregation_count": 0,
+                "identity_variables_emitted_as_measurements": 0,
+            },
         ),
     )
     temporal_registry_sha256 = _registry_sha256(rules)
@@ -619,6 +740,7 @@ def materialize_dhs_gc_silver(
     release: str,
     cluster_column: str = "DHSID",
     source_snapshot: SourceSnapshotRef | None = None,
+    release_files: Iterable[str | Path] | None = None,
     code_commit: str | None = None,
     overwrite: bool = False,
 ) -> tuple[
@@ -629,8 +751,19 @@ def materialize_dhs_gc_silver(
     DatasetRef,
     Path,
 ]:
-    """Register/validate one external GC file and materialize cluster-native Silver."""
-    snapshot = source_snapshot or register_dhs_gc_snapshot(source_path, release=release)
+    """Register/validate external GC files and materialize cluster-native Silver."""
+    _require_dhs_survey(survey)
+    source_path = Path(source_path).expanduser().resolve()
+    if source_snapshot is None:
+        snapshot_paths = tuple(release_files) if release_files is not None else (source_path,)
+        resolved_snapshot_paths = tuple(
+            Path(path).expanduser().resolve() for path in snapshot_paths
+        )
+        if source_path not in resolved_snapshot_paths:
+            resolved_snapshot_paths = (*resolved_snapshot_paths, source_path)
+        snapshot = register_dhs_gc_snapshot(resolved_snapshot_paths, release=release)
+    else:
+        snapshot = source_snapshot
     if snapshot.source != DHS_GC_SOURCE:
         raise ValueError("supplied source snapshot is not registered as DHS GC")
     if snapshot.release != release:
@@ -663,10 +796,15 @@ def materialize_dhs_gc_silver(
             "survey_release": survey.release,
             "source_release": snapshot.release,
             "source_snapshot_id": snapshot.snapshot_id,
-            "cluster_column": cluster_column,
+            "cluster_column": silver.cluster_column,
             "source_schema_sha256": silver.schema_sha256,
             "gid_aggregation": None,
             "imputation": None,
+            "ffill": None,
+            "bfill": None,
+            "interpolation": None,
+            "static_period_replication": None,
+            "implicit_survey_year_assignment": None,
         },
         code_commit=code_commit,
         qa=silver.qa,
@@ -692,6 +830,12 @@ def _temporal_metadata_json(result: DHSGCMeasurementResult) -> str:
                 "temporal_semantics": item.temporal_semantics.value,
                 "source_time_token": item.source_time_token,
                 "measurement_year": item.measurement_year,
+                "measurement_time": (
+                    item.measurement_time.isoformat()
+                    if item.measurement_time is not None
+                    else None
+                ),
+                "parse_status": item.parse_status,
                 "codebook_provenance": dict(item.codebook_provenance),
             }
         )
@@ -711,6 +855,7 @@ def materialize_dhs_gc_measurements(
     overwrite: bool = False,
 ) -> tuple[DHSGCMeasurementResult, RunManifest, DatasetRef, Path]:
     """Materialize the derived long GC measurement view with explicit temporal semantics."""
+    _require_dhs_survey(survey)
     rules = tuple(temporal_rules)
     selected_variables = tuple(variable_columns) if variable_columns is not None else None
     result = build_dhs_gc_measurements(
@@ -746,6 +891,7 @@ def materialize_dhs_gc_measurements(
             "interpolation": False,
             "static_period_replication": False,
             "gid_aggregation": False,
+            "identity_columns_as_measurements": False,
         },
         code_commit=code_commit,
         qa=result.qa,
