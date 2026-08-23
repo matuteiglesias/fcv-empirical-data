@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 from empirical_contracts import (
@@ -598,11 +599,11 @@ def materialize_dhs_hr_silver(
 __all__ = [
     "DHS_HR_RECODE",
     "DHS_SOURCE",
+    "HOUSEHOLD_GRAIN",
+    "STANDARD_DHS_HR_COLUMNS",
     "DhsHrColumnMap",
     "DhsHrMetadata",
     "DhsHrSilverResult",
-    "HOUSEHOLD_GRAIN",
-    "STANDARD_DHS_HR_COLUMNS",
     "build_dhs_hr_file_link",
     "build_dhs_survey_catalog",
     "build_dhs_survey_id",

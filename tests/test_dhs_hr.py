@@ -6,8 +6,8 @@ from empirical_contracts import AuthorityLevel
 from spatial_foundation import DataRoot
 
 from fcv_empirical.surveys.dhs_hr import (
-    DhsHrMetadata,
     STANDARD_DHS_HR_COLUMNS,
+    DhsHrMetadata,
     build_dhs_survey_id,
     iter_dhs_hr_design_records,
     materialize_dhs_hr_silver,
