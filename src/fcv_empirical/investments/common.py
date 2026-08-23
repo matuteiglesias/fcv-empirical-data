@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from empirical_contracts import DatasetRef, QAResult, RunManifest, SourceSnapshotRef
-from spatial_foundation import DataRoot
+from spatial_foundation import DataRoot, sha256_file
 
 from fcv_empirical.common import persist_run_artifact, serialize_qa
 
@@ -21,6 +22,52 @@ class InvestmentMaterializationResult:
     paths: dict[str, Path]
     qa: tuple[QAResult, ...]
     parity: dict[str, Any]
+
+
+def validate_source_snapshot(
+    snapshot: SourceSnapshotRef,
+    *,
+    expected_source: str,
+    expected_release: str | None = None,
+    required_paths: Iterable[str | Path] = (),
+    exact_paths: Iterable[str | Path] | None = None,
+) -> None:
+    """Verify that an external snapshot still identifies the bytes an adapter will read."""
+    if snapshot.source != expected_source:
+        raise ValueError(
+            f"snapshot source {snapshot.source!r} does not match expected source {expected_source!r}"
+        )
+    if expected_release is not None and snapshot.release != expected_release:
+        raise ValueError(
+            f"snapshot release {snapshot.release!r} does not match requested release "
+            f"{expected_release!r}"
+        )
+
+    refs_by_path: dict[Path, list[Any]] = {}
+    for ref in snapshot.files:
+        resolved = Path(ref.path).expanduser().resolve()
+        refs_by_path.setdefault(resolved, []).append(ref)
+
+    duplicate_paths = [path for path, refs in refs_by_path.items() if len(refs) != 1]
+    if duplicate_paths:
+        raise ValueError("snapshot contains duplicate source file identities")
+
+    for required in required_paths:
+        resolved = Path(required).expanduser().resolve()
+        if resolved not in refs_by_path:
+            raise ValueError(
+                f"source path must be represented exactly once in SourceSnapshotRef: {resolved}"
+            )
+
+    if exact_paths is not None:
+        current_paths = {Path(path).expanduser().resolve() for path in exact_paths}
+        if current_paths != set(refs_by_path):
+            raise ValueError("source file set changed after snapshot registration")
+
+    for path, refs in refs_by_path.items():
+        current = sha256_file(path)
+        if current != refs[0].sha256:
+            raise ValueError(f"source file changed after snapshot registration: {path}")
 
 
 def json_text(payload: Any) -> str:
