@@ -93,6 +93,7 @@ def test_household_grain_design_facts_and_source_variables_survive(tmp_path: Pat
     assert result.frame["stratum_id"].tolist() == ["11", "11", "22"]
     assert result.frame["hv201"].tolist() == raw["hv201"].tolist()
     assert result.frame["country_specific_note"].tolist() == ["a", "b", "c"]
+    assert result.frame["household_observation_id"].equals(result.frame["source_row_id"])
 
     cluster_one = result.frame.loc[result.frame["cluster_id"] == "1"]
     assert len(cluster_one) == 2
@@ -100,6 +101,7 @@ def test_household_grain_design_facts_and_source_variables_survive(tmp_path: Pat
 
     design = list(iter_dhs_hr_design_records(result.frame))
     assert len(design) == len(raw)
+    assert len({item.observation_id for item in design}) == len(raw)
     assert design[0].natural_grain == "household"
     assert design[0].source_weight_variable == "hv005"
     assert design[0].source_weight_value == 1_000_000
@@ -120,6 +122,8 @@ def test_identity_design_and_weight_anomalies_remain_visible(tmp_path: Path):
 
     assert len(result.frame) == 3
     assert result.frame["household_id"].tolist()[:2] == ["001001", "001001"]
+    assert result.frame["source_row_id"].is_unique
+    assert result.frame["household_observation_id"].is_unique
     assert _metric(result, "dhs.hr.household_identity", "duplicate_household_id_rows") == 2
     assert _metric(result, "dhs.hr.cluster_identity", "missing_cluster_ids") == 1
     assert _metric(result, "dhs.hr.cluster_identity", "cluster_count") == 1
@@ -137,9 +141,7 @@ def test_missing_household_id_is_visible_and_row_survives(tmp_path: Path):
     assert len(result.frame) == 3
     assert pd.isna(result.frame.loc[1, "household_id"])
     assert _metric(result, "dhs.hr.household_identity", "missing_household_ids") == 1
-    assert result.frame.loc[1, "household_observation_id"].startswith(
-        result.file_link.source_snapshot_id
-    )
+    assert result.frame.loc[1, "household_observation_id"] == result.frame.loc[1, "source_row_id"]
 
 
 def test_no_household_values_are_aggregated(tmp_path: Path):
@@ -179,9 +181,14 @@ def test_materialization_records_l3_lineage_hash_and_zero_padded_ids(tmp_path: P
     assert materialized["household_id"].tolist() == ["001001", "001002", "002001"]
     assert dataset.authority == AuthorityLevel.L3_REBUILT
     assert dataset.content_sha256 is not None
-    assert dataset.grain.keys == ("survey_id", "household_id")
+    assert dataset.schema_version == "dhs-hr-household-silver-v2"
+    assert dataset.grain.keys == ("source_row_id",)
+    assert materialized["source_row_id"].is_unique
     assert manifest.inputs == (snapshot,)
     assert manifest.outputs == (dataset,)
+    assert manifest.parameters["physical_row_key"] == "source_row_id"
+    assert manifest.parameters["natural_household_key"] == ["survey_id", "household_id"]
+    assert "not assumed unique" in manifest.parameters["natural_household_key_semantics"]
     assert manifest.parameters["source_weight_transformation"] is None
     assert manifest.parameters["aggregation"] is None
     assert silver.file_link.source_snapshot_id == snapshot.snapshot_id
@@ -190,6 +197,25 @@ def test_materialization_records_l3_lineage_hash_and_zero_padded_ids(tmp_path: P
     assert (run / "artifacts/catalog/dhs_survey.json").exists()
     assert (run / "artifacts/catalog/dhs_hr_file_link.json").exists()
     assert (run / "artifacts/mappings/dhs_hr_source_columns.json").exists()
+
+
+def test_duplicate_household_id_can_survive_without_false_dataset_grain(tmp_path: Path):
+    source = tmp_path / "ZZHR71FL.csv"
+    raw = _raw().copy()
+    raw.loc[1, "hhid"] = raw.loc[0, "hhid"]
+    raw.to_csv(source, index=False)
+
+    _, silver, _, dataset, output = materialize_dhs_hr_silver(
+        source_path=source,
+        metadata=_metadata(),
+        column_map=STANDARD_DHS_HR_COLUMNS,
+        data_root=DataRoot.from_path(tmp_path / "data"),
+        run_id="dhs-hr-duplicate-natural-id",
+    )
+
+    assert silver.frame["household_id"].duplicated().any()
+    assert dataset.grain.keys == ("source_row_id",)
+    assert pd.read_parquet(output)["source_row_id"].is_unique
 
 
 def test_registered_snapshot_mutation_fails_closed(tmp_path: Path):
