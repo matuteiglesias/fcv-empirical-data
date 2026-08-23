@@ -139,7 +139,10 @@ def test_numeric_equivalence_is_reported_but_never_used_as_a_silent_join_rule():
     assert set(report.cluster_support["cluster_link_id"]) == {"001", "002", "1", "2"}
     normalization = _qa(report, "dhs.integration.cluster_identity_normalization")
     assert normalization.state == "YELLOW"
-    assert normalization.metrics["numeric_alias_pairs"] == 2
+    assert normalization.metrics["hr_gps_alias_pairs"] == 2
+    assert normalization.metrics["hr_gc_alias_pairs"] == 2
+    assert normalization.metrics["gps_gc_alias_pairs"] == 0
+    assert normalization.metrics["numeric_alias_pairs"] == 4
 
 
 def test_cross_survey_product_is_rejected_before_support_comparison():
