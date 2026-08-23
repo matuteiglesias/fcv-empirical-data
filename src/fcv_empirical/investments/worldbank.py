@@ -24,12 +24,19 @@ from fcv_empirical.investments.common import (
     coverage_profile,
     json_text,
     persist_contract_artifacts,
+    validate_source_snapshot,
 )
 from fcv_empirical.investments.parity import compare_unique_key_tables, legacy_dataset_ref
 
 WORLD_BANK_SOURCE = "worldbank_projects_api"
 WORLD_BANK_ORIGIN = "https://search.worldbank.org/api/v2/projects"
 WORLD_BANK_PROJECT_ID = "id"
+WORLD_BANK_SNAPSHOT_SIDECARS = (
+    "source_metadata.json",
+    "api_query_log.json",
+    "api_errors.json",
+    "page_counts.csv",
+)
 WB_PARITY_FIELDS = (
     "id",
     "project_name",
@@ -245,6 +252,14 @@ def _source_metadata(source_dir: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _snapshot_files(source_dir: Path) -> list[Path]:
+    pages = sorted(source_dir.glob("page_os_*.json"))
+    if not pages:
+        raise FileNotFoundError(f"no World Bank page_os_*.json files found under {source_dir}")
+    sidecars = [source_dir / name for name in WORLD_BANK_SNAPSHOT_SIDECARS if (source_dir / name).exists()]
+    return [*pages, *sidecars]
+
+
 def register_worldbank_snapshot(
     source_dir: str | Path,
     *,
@@ -252,17 +267,10 @@ def register_worldbank_snapshot(
 ) -> SourceSnapshotRef:
     """Register downloaded page responses plus acquisition metadata, excluding derived flat files."""
     root = Path(source_dir)
-    pages = sorted(root.glob("page_os_*.json"))
-    if not pages:
-        raise FileNotFoundError(f"no World Bank page_os_*.json files found under {root}")
-    sidecars = [
-        root / name
-        for name in ("source_metadata.json", "api_query_log.json", "api_errors.json", "page_counts.csv")
-        if (root / name).exists()
-    ]
+    snapshot_files = _snapshot_files(root)
     metadata = _source_metadata(root)
     resolved_release = release or str(metadata.get("accessed_date") or root.name)
-    snapshot = register_external_snapshot(WORLD_BANK_SOURCE, resolved_release, [*pages, *sidecars])
+    snapshot = register_external_snapshot(WORLD_BANK_SOURCE, resolved_release, snapshot_files)
     return snapshot.model_copy(update={"origin": WORLD_BANK_ORIGIN})
 
 
@@ -324,8 +332,16 @@ def materialize_worldbank_silver(
     overwrite: bool = False,
 ) -> InvestmentMaterializationResult:
     """Materialize downloaded World Bank page JSON to one source-project-per-row Silver table."""
-    snapshot = source_snapshot or register_worldbank_snapshot(source_dir, release=release)
-    extraction = load_worldbank_pages(source_dir)
+    root = Path(source_dir)
+    snapshot = source_snapshot or register_worldbank_snapshot(root, release=release)
+    snapshot_files = _snapshot_files(root)
+    validate_source_snapshot(
+        snapshot,
+        expected_source=WORLD_BANK_SOURCE,
+        expected_release=release,
+        exact_paths=snapshot_files,
+    )
+    extraction = load_worldbank_pages(root)
     version = snapshot.snapshot_id
     silver_base = data_root.silver("investments", "worldbank", version)
     ref = _dataset_ref(version)
