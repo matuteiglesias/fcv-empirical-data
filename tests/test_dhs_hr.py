@@ -70,7 +70,7 @@ def test_survey_identity_comes_from_verified_metadata_not_filename():
     assert build_dhs_survey_id(second) == build_dhs_survey_id(first)
 
     with pytest.raises(ValueError, match="stable source metadata token"):
-        _metadata().__class__(
+        DhsHrMetadata(
             dhs_survey_id="unresolved survey id",
             country_iso3="ZZZ",
             country="Synthetic Republic",
@@ -108,20 +108,38 @@ def test_household_grain_design_facts_and_source_variables_survive(tmp_path: Pat
     assert design[0].stratum_id == "11"
 
 
-def test_identity_and_weight_anomalies_remain_visible_without_deduplication(tmp_path: Path):
+def test_identity_design_and_weight_anomalies_remain_visible(tmp_path: Path):
     raw = _raw().copy()
     raw.loc[1, "hhid"] = raw.loc[0, "hhid"]
     raw.loc[2, "hv005"] = None
     raw.loc[0, "hv005"] = 0
+    raw.loc[2, "hv001"] = None
+    raw.loc[1, "hv022"] = None
 
     result = _normalized(tmp_path, raw)
 
     assert len(result.frame) == 3
     assert result.frame["household_id"].tolist()[:2] == ["001001", "001001"]
     assert _metric(result, "dhs.hr.household_identity", "duplicate_household_id_rows") == 2
+    assert _metric(result, "dhs.hr.cluster_identity", "missing_cluster_ids") == 1
+    assert _metric(result, "dhs.hr.cluster_identity", "cluster_count") == 1
     assert _metric(result, "dhs.hr.source_weight", "missing_weights") == 1
     assert _metric(result, "dhs.hr.source_weight", "nonpositive_weights") == 1
-    assert _metric(result, "dhs.hr.cluster_identity", "cluster_count") == 2
+    assert _metric(result, "dhs.hr.stratum", "missing_stratum_ids") == 1
+
+
+def test_missing_household_id_is_visible_and_row_survives(tmp_path: Path):
+    raw = _raw().copy()
+    raw.loc[1, "hhid"] = None
+
+    result = _normalized(tmp_path, raw)
+
+    assert len(result.frame) == 3
+    assert pd.isna(result.frame.loc[1, "household_id"])
+    assert _metric(result, "dhs.hr.household_identity", "missing_household_ids") == 1
+    assert result.frame.loc[1, "household_observation_id"].startswith(
+        result.file_link.source_snapshot_id
+    )
 
 
 def test_no_household_values_are_aggregated(tmp_path: Path):
@@ -134,7 +152,7 @@ def test_no_household_values_are_aggregated(tmp_path: Path):
     assert _metric(result, "dhs.hr.row_retention", "output_rows") == 3
 
 
-def test_materialization_records_l3_lineage_and_hash(tmp_path: Path):
+def test_materialization_records_l3_lineage_hash_and_zero_padded_ids(tmp_path: Path):
     source = tmp_path / "ZZHR71FL.csv"
     _raw().to_csv(source, index=False)
     data_root = DataRoot.from_path(tmp_path / "data")
@@ -149,8 +167,16 @@ def test_materialization_records_l3_lineage_and_hash(tmp_path: Path):
     )
 
     assert output.exists()
+    assert output.parts[-5:-1] == (
+        "surveys",
+        "dhs",
+        "dhs-ZZ2020DHS",
+        snapshot.snapshot_id,
+    )
     materialized = pd.read_parquet(output)
     assert len(materialized) == len(_raw())
+    assert materialized["hhid"].tolist() == ["001001", "001002", "002001"]
+    assert materialized["household_id"].tolist() == ["001001", "001002", "002001"]
     assert dataset.authority == AuthorityLevel.L3_REBUILT
     assert dataset.content_sha256 is not None
     assert dataset.grain.keys == ("survey_id", "household_id")

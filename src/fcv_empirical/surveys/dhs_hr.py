@@ -33,7 +33,7 @@ _SURVEY_TOKEN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 @dataclass(frozen=True)
 class DhsHrMetadata:
-    """Verified DHS metadata needed to identify one HR source file without filename inference."""
+    """Verified DHS metadata needed to identify one HR file without filename inference."""
 
     dhs_survey_id: str
     country_iso3: str
@@ -77,12 +77,7 @@ class DhsHrMetadata:
 
 @dataclass(frozen=True)
 class DhsHrColumnMap:
-    """Release-verified source-variable mapping for the HR normalized envelope.
-
-    The map is intentionally explicit at materialization time. DHS standard recodes commonly use
-    HHID/HV001/HV005/HV021/HV022, but the caller must verify the release-specific documentation
-    rather than relying on an experiment-side design convention.
-    """
+    """Release-verified mapping from source variables to the normalized HR envelope."""
 
     household_id: str
     cluster_id: str
@@ -121,7 +116,7 @@ class DhsHrSilverResult:
 
 
 def build_dhs_survey_id(metadata: DhsHrMetadata) -> str:
-    """Build internal survey identity from a verified DHS survey identifier, never a filename."""
+    """Build internal identity from a verified DHS survey token, never the filename."""
     return f"dhs-{metadata.dhs_survey_id}"
 
 
@@ -147,6 +142,14 @@ def register_dhs_hr_snapshot(
     return snapshot.model_copy(update={"origin": origin})
 
 
+def _matching_source_file(snapshot: SourceSnapshotRef, source_path: str | Path):
+    resolved = Path(source_path).expanduser().resolve()
+    matches = [ref for ref in snapshot.files if Path(ref.path).expanduser().resolve() == resolved]
+    if len(matches) != 1:
+        raise ValueError("DHS source_path must be represented exactly once in SourceSnapshotRef")
+    return matches[0]
+
+
 def _validate_snapshot_source(
     snapshot: SourceSnapshotRef,
     source_path: str | Path,
@@ -159,21 +162,9 @@ def _validate_snapshot_source(
         )
     if snapshot.release != release:
         raise ValueError("supplied DHS snapshot release does not match verified DHS metadata")
-    resolved = Path(source_path).expanduser().resolve()
-    matches = [ref for ref in snapshot.files if Path(ref.path).expanduser().resolve() == resolved]
-    if len(matches) != 1:
-        raise ValueError("DHS source_path must be represented exactly once in SourceSnapshotRef")
-    current = sha256_file(resolved)
-    if current != matches[0].sha256:
+    source_file = _matching_source_file(snapshot, source_path)
+    if sha256_file(Path(source_path).expanduser().resolve()) != source_file.sha256:
         raise ValueError("DHS source file changed after snapshot registration")
-
-
-def _source_file_ref(snapshot: SourceSnapshotRef, source_path: str | Path):
-    resolved = Path(source_path).expanduser().resolve()
-    matches = [ref for ref in snapshot.files if Path(ref.path).expanduser().resolve() == resolved]
-    if len(matches) != 1:
-        raise ValueError("DHS source_path must be represented exactly once in SourceSnapshotRef")
-    return matches[0]
 
 
 def build_dhs_hr_file_link(
@@ -185,7 +176,7 @@ def build_dhs_hr_file_link(
     link = SurveyFileLink(
         survey_id=catalog.survey_id,
         source_snapshot_id=snapshot.snapshot_id,
-        source_file=_source_file_ref(snapshot, source_path),
+        source_file=_matching_source_file(snapshot, source_path),
         instrument=DHS_HR_RECODE,
     )
     validate_survey_file_link(catalog, link, snapshot)
@@ -195,9 +186,8 @@ def build_dhs_hr_file_link(
 def _resolve_column(columns: list[str], requested: str | None) -> str | None:
     if requested is None:
         return None
-    exact = [column for column in columns if column == requested]
-    if len(exact) == 1:
-        return exact[0]
+    if requested in columns:
+        return requested
     folded = [column for column in columns if column.casefold() == requested.casefold()]
     if len(folded) == 1:
         return folded[0]
@@ -217,14 +207,14 @@ def _resolve_source_columns(raw: pd.DataFrame, column_map: DhsHrColumnMap) -> di
         "psu_id": _resolve_column(columns, column_map.psu_id),
         "stratum_id": _resolve_column(columns, column_map.stratum_id),
     }
-    missing_required = [
+    missing = [
         field
         for field in ("household_id", "cluster_id", "source_weight")
         if resolved[field] is None
     ]
-    if missing_required:
+    if missing:
         raise ValueError(
-            "DHS HR input is missing release-verified source fields: " + ", ".join(missing_required)
+            "DHS HR input is missing release-verified source fields: " + ", ".join(missing)
         )
     for field in ("psu_id", "stratum_id"):
         requested = getattr(column_map, field)
@@ -244,93 +234,16 @@ def _raw_present(series: pd.Series) -> pd.Series:
     return series.notna() & series.astype("string").str.strip().fillna("").ne("")
 
 
-def normalize_dhs_hr(
-    raw: pd.DataFrame,
-    *,
-    metadata: DhsHrMetadata,
-    snapshot: SourceSnapshotRef,
-    source_path: str | Path,
-    column_map: DhsHrColumnMap,
-) -> DhsHrSilverResult:
-    """Build row-preserving household Silver while retaining every source-native column."""
-    if snapshot.source != DHS_SOURCE:
-        raise ValueError("DHS HR normalization requires a DHS SourceSnapshotRef")
-    if snapshot.release != metadata.release:
-        raise ValueError("DHS snapshot release does not match verified metadata release")
-    if Path(source_path).name != metadata.source_file_name:
-        raise ValueError("source_path filename does not match verified DHS source_file_name")
-
-    catalog = build_dhs_survey_catalog(metadata)
-    file_link = build_dhs_hr_file_link(catalog=catalog, snapshot=snapshot, source_path=source_path)
-    source_columns = _resolve_source_columns(raw, column_map)
-
-    envelope_columns = {
-        "survey_id",
-        "source_family",
-        "source_release",
-        "source_snapshot_id",
-        "source_file_name",
-        "source_recode",
-        "source_row_id",
-        "household_observation_id",
-        "household_id",
-        "cluster_id",
-        "psu_id",
-        "stratum_id",
-        "source_weight_variable",
-        "source_household_weight",
-        "country",
-        "country_iso3",
-    }
-    collisions = sorted(envelope_columns.intersection(str(column) for column in raw.columns))
-    if collisions:
-        raise ValueError(
-            "DHS source columns collide with normalized envelope names: " + ", ".join(collisions)
-        )
-
-    source = raw.reset_index(drop=True).copy()
-    envelope = pd.DataFrame(index=source.index)
-    envelope["survey_id"] = catalog.survey_id
-    envelope["source_family"] = DHS_SOURCE
-    envelope["source_release"] = snapshot.release
-    envelope["source_snapshot_id"] = snapshot.snapshot_id
-    envelope["source_file_name"] = metadata.source_file_name
-    envelope["source_recode"] = metadata.recode_family.upper()
-    envelope["source_row_id"] = [
-        f"{snapshot.snapshot_id}:{position:09d}" for position in range(len(source))
+def _schema_hash(frame: pd.DataFrame) -> str:
+    entries = [
+        (str(column), str(dtype))
+        for column, dtype in zip(frame.columns, frame.dtypes, strict=True)
     ]
+    payload = json.dumps(entries, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-    household_ids = _id_series(source[source_columns["household_id"]])
-    cluster_ids = _id_series(source[source_columns["cluster_id"]])
-    envelope["household_id"] = household_ids
-    envelope["cluster_id"] = cluster_ids
 
-    psu_column = source_columns["psu_id"]
-    stratum_column = source_columns["stratum_id"]
-    envelope["psu_id"] = (
-        _id_series(source[psu_column])
-        if psu_column is not None
-        else pd.Series(pd.NA, index=source.index, dtype="string")
-    )
-    envelope["stratum_id"] = (
-        _id_series(source[stratum_column])
-        if stratum_column is not None
-        else pd.Series(pd.NA, index=source.index, dtype="string")
-    )
-
-    envelope["source_weight_variable"] = source_columns["source_weight"]
-    envelope["source_household_weight"] = source[source_columns["source_weight"]].copy()
-    envelope["country"] = metadata.country
-    envelope["country_iso3"] = metadata.country_iso3
-    envelope["household_observation_id"] = [
-        f"{catalog.survey_id}:{household_id}" if pd.notna(household_id) else source_row_id
-        for household_id, source_row_id in zip(
-            envelope["household_id"], envelope["source_row_id"], strict=True
-        )
-    ]
-
-    frame = pd.concat([envelope, source], axis=1)
-
+def _build_qa(source: pd.DataFrame, frame: pd.DataFrame, schema_sha256: str) -> tuple[QAResult, ...]:
     missing_household_ids = int(frame["household_id"].isna().sum())
     present_household_ids = frame.loc[frame["household_id"].notna(), "household_id"]
     duplicate_household_id_rows = int(present_household_ids.duplicated(keep=False).sum())
@@ -347,14 +260,7 @@ def normalize_dhs_hr(
     nonpositive_weights = int((numeric_weight.notna() & numeric_weight.le(0)).sum())
 
     source_preserved = frame[list(source.columns)].equals(source)
-    schema_entries = [
-        (str(column), str(dtype))
-        for column, dtype in zip(source.columns, source.dtypes, strict=True)
-    ]
-    schema_payload = json.dumps(schema_entries, ensure_ascii=False)
-    schema_sha256 = hashlib.sha256(schema_payload.encode("utf-8")).hexdigest()
-
-    qa = (
+    return (
         QAResult(
             check_id="dhs.hr.row_retention",
             state="GREEN" if len(frame) == len(source) else "RED",
@@ -368,7 +274,7 @@ def normalize_dhs_hr(
                 if missing_household_ids == 0 and duplicate_household_id_rows == 0
                 else "RED"
             ),
-            message="household source identifiers are preserved and duplicate keys remain visible",
+            message="household source identifiers are preserved and anomalies remain visible",
             metrics={
                 "missing_household_ids": missing_household_ids,
                 "duplicate_household_id_rows": duplicate_household_id_rows,
@@ -391,21 +297,20 @@ def normalize_dhs_hr(
                 if missing_weights == 0 and invalid_weights == 0 and nonpositive_weights == 0
                 else "YELLOW"
             ),
-            message=(
-                "source household weight is preserved unchanged; "
-                "QA parses only for diagnostics"
-            ),
+            message="source household weight is unchanged; numeric parsing is diagnostic only",
             metrics={
                 "missing_weights": missing_weights,
                 "invalid_weights": invalid_weights,
                 "nonpositive_weights": nonpositive_weights,
-                "source_weight_variable": source_columns["source_weight"],
+                "source_weight_variable": frame["source_weight_variable"].iloc[0]
+                if len(frame)
+                else None,
             },
         ),
         QAResult(
             check_id="dhs.hr.stratum",
             state="GREEN" if missing_strata == 0 else "YELLOW",
-            message="source stratum identifier is preserved without choosing an estimation design",
+            message="source stratum is preserved without selecting an estimation design",
             metrics={"missing_stratum_ids": missing_strata},
         ),
         QAResult(
@@ -422,9 +327,94 @@ def normalize_dhs_hr(
         ),
     )
 
+
+def normalize_dhs_hr(
+    raw: pd.DataFrame,
+    *,
+    metadata: DhsHrMetadata,
+    snapshot: SourceSnapshotRef,
+    source_path: str | Path,
+    column_map: DhsHrColumnMap,
+) -> DhsHrSilverResult:
+    """Build row-preserving household Silver while retaining every source-native column."""
+    if snapshot.source != DHS_SOURCE:
+        raise ValueError("DHS HR normalization requires a DHS SourceSnapshotRef")
+    if snapshot.release != metadata.release:
+        raise ValueError("DHS snapshot release does not match verified metadata release")
+    if Path(source_path).name != metadata.source_file_name:
+        raise ValueError("source_path filename does not match verified DHS source_file_name")
+
+    catalog = build_dhs_survey_catalog(metadata)
+    file_link = build_dhs_hr_file_link(catalog=catalog, snapshot=snapshot, source_path=source_path)
+    source = raw.reset_index(drop=True).copy()
+    source.columns = [str(column) for column in source.columns]
+    source_columns = _resolve_source_columns(source, column_map)
+
+    envelope_names = {
+        "survey_id",
+        "source_family",
+        "source_release",
+        "source_snapshot_id",
+        "source_file_name",
+        "source_recode",
+        "source_row_id",
+        "household_observation_id",
+        "household_id",
+        "cluster_id",
+        "psu_id",
+        "stratum_id",
+        "source_weight_variable",
+        "source_household_weight",
+        "country",
+        "country_iso3",
+    }
+    collisions = sorted(envelope_names.intersection(source.columns))
+    if collisions:
+        raise ValueError(
+            "DHS source columns collide with normalized envelope names: " + ", ".join(collisions)
+        )
+
+    envelope = pd.DataFrame(index=source.index)
+    envelope["survey_id"] = catalog.survey_id
+    envelope["source_family"] = DHS_SOURCE
+    envelope["source_release"] = snapshot.release
+    envelope["source_snapshot_id"] = snapshot.snapshot_id
+    envelope["source_file_name"] = metadata.source_file_name
+    envelope["source_recode"] = DHS_HR_RECODE
+    envelope["source_row_id"] = [
+        f"{snapshot.snapshot_id}:{position:09d}" for position in range(len(source))
+    ]
+    envelope["household_id"] = _id_series(source[source_columns["household_id"]])
+    envelope["cluster_id"] = _id_series(source[source_columns["cluster_id"]])
+
+    psu_column = source_columns["psu_id"]
+    stratum_column = source_columns["stratum_id"]
+    envelope["psu_id"] = (
+        _id_series(source[psu_column])
+        if psu_column is not None
+        else pd.Series(pd.NA, index=source.index, dtype="string")
+    )
+    envelope["stratum_id"] = (
+        _id_series(source[stratum_column])
+        if stratum_column is not None
+        else pd.Series(pd.NA, index=source.index, dtype="string")
+    )
+    envelope["source_weight_variable"] = source_columns["source_weight"]
+    envelope["source_household_weight"] = source[source_columns["source_weight"]].copy()
+    envelope["country"] = metadata.country
+    envelope["country_iso3"] = metadata.country_iso3
+    envelope["household_observation_id"] = [
+        f"{catalog.survey_id}:{household_id}" if pd.notna(household_id) else source_row_id
+        for household_id, source_row_id in zip(
+            envelope["household_id"], envelope["source_row_id"], strict=True
+        )
+    ]
+
+    frame = pd.concat([envelope, source], axis=1)
+    schema_sha256 = _schema_hash(source)
     return DhsHrSilverResult(
         frame=frame,
-        qa=qa,
+        qa=_build_qa(source, frame, schema_sha256),
         catalog=catalog,
         file_link=file_link,
         source_columns=source_columns,
@@ -433,8 +423,8 @@ def normalize_dhs_hr(
 
 
 def iter_dhs_hr_design_records(frame: pd.DataFrame) -> Iterator[SurveyDesignRecord]:
-    """Expose S0 design records without normalizing weights or selecting an estimation design."""
-    required = {
+    """Expose S0 design records without normalizing weights or choosing an estimator design."""
+    columns = (
         "survey_id",
         "household_observation_id",
         "cluster_id",
@@ -442,12 +432,12 @@ def iter_dhs_hr_design_records(frame: pd.DataFrame) -> Iterator[SurveyDesignReco
         "stratum_id",
         "source_weight_variable",
         "source_household_weight",
-    }
-    missing = sorted(required.difference(frame.columns))
+    )
+    missing = [column for column in columns if column not in frame.columns]
     if missing:
         raise ValueError("DHS HR Silver is missing design envelope columns: " + ", ".join(missing))
 
-    for row in frame[list(required)].to_dict(orient="records"):
+    for row in frame[list(columns)].to_dict(orient="records"):
         weight = row["source_household_weight"]
         if pd.isna(weight):
             weight = None
@@ -471,7 +461,7 @@ def _read_hr_source(source_path: str | Path) -> pd.DataFrame:
     if suffix == ".dta":
         return pd.read_stata(path, convert_categoricals=False)
     if suffix == ".csv":
-        return pd.read_csv(path, low_memory=False)
+        return pd.read_csv(path, dtype=str, low_memory=False)
     if suffix in {".parquet", ".pq"}:
         return pd.read_parquet(path)
     raise ValueError("unsupported DHS HR source format; expected .dta, .csv, or .parquet")
@@ -516,9 +506,8 @@ def materialize_dhs_hr_silver(
         raise ValueError("source_path filename does not match verified DHS source_file_name")
     snapshot = source_snapshot or register_dhs_hr_snapshot(path, release=metadata.release)
     _validate_snapshot_source(snapshot, path, release=metadata.release)
-    raw = _read_hr_source(path)
     silver = normalize_dhs_hr(
-        raw,
+        _read_hr_source(path),
         metadata=metadata,
         snapshot=snapshot,
         source_path=path,
@@ -527,7 +516,7 @@ def materialize_dhs_hr_silver(
 
     dataset = _dataset_ref(snapshot)
     destination = data_root.silver(
-        "surveys", "dhs", silver.catalog.survey_id, snapshot.snapshot_id
+        "surveys", f"dhs/{silver.catalog.survey_id}", snapshot.snapshot_id
     )
     manifest = materialize_files(
         data_root=data_root,
@@ -545,6 +534,8 @@ def materialize_dhs_hr_silver(
             "survey_id": silver.catalog.survey_id,
             "dhs_survey_id": metadata.dhs_survey_id,
             "country_iso3": metadata.country_iso3,
+            "survey_year": metadata.survey_year,
+            "survey_phase": metadata.survey_phase,
             "source_release": snapshot.release,
             "source_recode": DHS_HR_RECODE,
             "source_file_name": metadata.source_file_name,
