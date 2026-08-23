@@ -213,7 +213,9 @@ def _source_token(value: object) -> str | None:
 
 
 def _resolve_source_column(frame: pd.DataFrame, source_variable: str) -> str:
-    matches = [column for column in frame.columns if str(column).casefold() == source_variable.casefold()]
+    matches = [
+        column for column in frame.columns if str(column).casefold() == source_variable.casefold()
+    ]
     if len(matches) != 1:
         if not matches:
             raise ValueError(
@@ -262,6 +264,14 @@ def _validate_registry(
         raise ValueError("DHS registry measurement_id values must be unique")
     if len(set(source_variables)) != len(source_variables):
         raise ValueError("DHS registry source_variable values must be unique")
+    missing_provenance = [
+        item.source_variable for item in definitions if not item.codebook_provenance
+    ]
+    if missing_provenance:
+        raise ValueError(
+            "DHS variable definitions require codebook provenance: "
+            + ", ".join(missing_provenance)
+        )
     mismatched = [
         item.source_variable
         for item in definitions
