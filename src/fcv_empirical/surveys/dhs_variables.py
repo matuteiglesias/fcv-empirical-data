@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import numbers
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Literal
 
 import pandas as pd
 from empirical_contracts import (
