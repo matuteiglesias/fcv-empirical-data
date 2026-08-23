@@ -3,13 +3,13 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point, Polygon
+from spatial_foundation import DataRoot
 
 from fcv_empirical.investments.geogcdf import (
     materialize_geogcdf_silver,
     normalize_geogcdf_projects,
     register_geogcdf_snapshot,
 )
-from spatial_foundation import DataRoot
 
 
 def _source_frame() -> gpd.GeoDataFrame:

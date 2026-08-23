@@ -130,7 +130,7 @@ def test_commitment_gold_materializes_structural_zeros_without_allocating_amount
         & gold.frame["period_id"].eq("2001-2002")
     ].iloc[0]
     assert zero["project_count"] == 0
-    assert zero["record_present"] == False  # noqa: E712
+    assert not bool(zero["record_present"])
     assert zero["measurement_status"] == "structural_zero"
 
 

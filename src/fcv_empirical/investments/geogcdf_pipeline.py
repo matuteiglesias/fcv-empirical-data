@@ -22,7 +22,7 @@ from spatial_foundation import DataRoot
 
 from fcv_empirical.common import FileMaterialization, materialize_files, persist_run_artifact
 
-from .geogcdf import GeoGCDFSilverResult, materialize_geogcdf_silver
+from .geogcdf import materialize_geogcdf_silver
 from .geogcdf_measurements import (
     GeoGCDFGeographyResult,
     GeoGCDFGoldResult,
