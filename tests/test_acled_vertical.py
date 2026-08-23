@@ -15,8 +15,8 @@ from empirical_contracts import (
 from shapely.geometry import Polygon
 from spatial_foundation import DataRoot
 
-from fcv_empirical.violence.acled_pipeline import materialize_acled_vertical
 from fcv_empirical.violence.acled_parity import compare_acled_legacy
+from fcv_empirical.violence.acled_pipeline import materialize_acled_vertical
 
 
 def _source(path: Path) -> None:
