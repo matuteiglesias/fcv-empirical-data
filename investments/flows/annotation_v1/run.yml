@@ -1,0 +1,35 @@
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Run.schema.json
+
+flow: .
+
+data: inputs/data.jsonl
+
+environment_variables:
+  OPENAI_API_KEY: ${open_ai_connection.api_key}
+  AZURE_OPENAI_API_BASE: ${open_ai_connection.api_base}
+  AZURE_OPENAI_API_TYPE: azure
+
+column_mapping:
+  annotation_record_id: ${data.annotation_record_id}
+  source_family: ${data.source_family}
+  source_id: ${data.source_id}
+  source_project_id: ${data.source_project_id}
+  source_parent_id: ${data.source_parent_id}
+  project_title: ${data.project_title}
+  project_description: ${data.project_description}
+  country_name: ${data.country_name}
+  country_iso3: ${data.country_iso3}
+  region_name: ${data.region_name}
+  commitment_year: ${data.commitment_year}
+  sector_code: ${data.sector_code}
+  sector_name: ${data.sector_name}
+  theme_or_intent: ${data.theme_or_intent}
+  infrastructure_flag: ${data.infrastructure_flag}
+  finance_type: ${data.finance_type}
+  flow_class: ${data.flow_class}
+  implementation_status: ${data.implementation_status}
+  location_text: ${data.location_text}
+  source_url: ${data.source_url}
+  recommended_for_aggregates: ${data.recommended_for_aggregates}
+  umbrella_flag: ${data.umbrella_flag}
+  text_bundle_for_annotation: ${data.text_bundle_for_annotation}

@@ -1,0 +1,141 @@
+{
+  "name": "parsed_message",
+  "description": "Schema for classifying development finance project records by local implementation and employment-related treatment relevance.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "annotation_record_id": {
+        "type": "string",
+        "description": "Stable identifier of the annotation input row. Must match the input annotation_record_id."
+      },
+      "locally_implemented": {
+        "type": "string",
+        "enum": [
+          "yes",
+          "no_macro_policy",
+          "no_financial_transaction_only",
+          "no_donor_country_activity",
+          "no_no_recipient_local_implementation",
+          "mixed",
+          "unclear"
+        ],
+        "description": "Whether the project involves local implementation, delivery, physical works, services, equipment, training, or place-based activity."
+      },
+      "macro_policy_only": {
+        "type": "string",
+        "enum": [
+          "Yes",
+          "No",
+          "Unclear"
+        ],
+        "description": "Indicates whether the project is purely macro policy, budget support, regulation, national strategy, or central institutional reform with no described local implementation."
+      },
+      "jobs_direct": {
+        "type": "string",
+        "enum": [
+          "Yes",
+          "No",
+          "Unclear"
+        ],
+        "description": "Indicates whether the project explicitly mentions jobs, employment, workers, labor, skills training, livelihoods, income generation, cash-for-work, public works, SMEs, or enterprise support."
+      },
+      "jobs_indirect": {
+        "type": "string",
+        "enum": [
+          "Yes",
+          "No",
+          "Unclear"
+        ],
+        "description": "Indicates whether the project has a concrete local or productive channel that plausibly supports employment or productive activity even if jobs are not explicitly mentioned."
+      },
+      "jobs_any": {
+        "type": "string",
+        "enum": [
+          "Yes",
+          "No",
+          "Unclear"
+        ],
+        "description": "Overall jobs relevance. Should be Yes if jobs_direct is Yes or jobs_indirect is Yes. Use Unclear only when evidence is insufficient or conflicting."
+      },
+      "non_jobs": {
+        "type": "string",
+        "enum": [
+          "Yes",
+          "No",
+          "Unclear"
+        ],
+        "description": "Indicates whether the project should be treated as not jobs-related. Should usually be the inverse of jobs_any, except when evidence is unclear."
+      },
+      "jobs_channel": {
+        "type": "string",
+        "enum": [
+          "direct_employment",
+          "skills_training",
+          "livelihoods",
+          "public_works",
+          "sme_private_sector",
+          "agriculture_productivity",
+          "transport_market_access",
+          "energy_access_productivity",
+          "water_irrigation_productivity",
+          "construction_infrastructure",
+          "human_capital_health_education",
+          "emergency_humanitarian_no_jobs",
+          "governance_macro_policy",
+          "none",
+          "unclear"
+        ],
+        "description": "Main mechanism linking the project to employment or productive activity. Use none when no jobs channel is present."
+      },
+      "confidence": {
+        "type": "string",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "description": "Confidence in the annotation based only on the provided project text."
+      },
+      "needs_second_review": {
+        "type": "string",
+        "enum": [
+          "Yes",
+          "No"
+        ],
+        "description": "Whether the record should be reviewed by a human or second model pass because it is ambiguous, mixed, weak-text, borderline, or important for treatment definition."
+      },
+      "evidence_summary": {
+        "type": "string",
+        "description": "Brief summary of the textual evidence used for the annotation. Do not invent facts beyond the input text."
+      },
+      "local_implementation_rationale": {
+        "type": "string",
+        "description": "Brief explanation for the locally_implemented and macro_policy_only labels."
+      },
+      "jobs_rationale": {
+        "type": "string",
+        "description": "Brief explanation for the jobs_direct, jobs_indirect, jobs_any, non_jobs, and jobs_channel labels."
+      },
+      "review_notes": {
+        "type": "string",
+        "description": "Concise notes about ambiguity, missing information, or why second review is needed. Use an empty string if none."
+      }
+    },
+    "required": [
+      "annotation_record_id",
+      "locally_implemented",
+      "macro_policy_only",
+      "jobs_direct",
+      "jobs_indirect",
+      "jobs_any",
+      "non_jobs",
+      "jobs_channel",
+      "confidence",
+      "needs_second_review",
+      "evidence_summary",
+      "local_implementation_rationale",
+      "jobs_rationale",
+      "review_notes"
+    ]
+  }
+}

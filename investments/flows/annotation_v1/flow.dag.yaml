@@ -1,0 +1,105 @@
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+
+inputs:
+  annotation_record_id:
+    type: string
+  source_family:
+    type: string
+  source_id:
+    type: string
+  source_project_id:
+    type: string
+  source_parent_id:
+    type: string
+  project_title:
+    type: string
+  project_description:
+    type: string
+  country_name:
+    type: string
+  country_iso3:
+    type: string
+  region_name:
+    type: string
+  commitment_year:
+    type: string
+  sector_code:
+    type: string
+  sector_name:
+    type: string
+  theme_or_intent:
+    type: string
+  infrastructure_flag:
+    type: string
+  finance_type:
+    type: string
+  flow_class:
+    type: string
+  implementation_status:
+    type: string
+  location_text:
+    type: string
+  source_url:
+    type: string
+  recommended_for_aggregates:
+    type: string
+  umbrella_flag:
+    type: string
+  text_bundle_for_annotation:
+    type: string
+
+outputs:
+  annotation_record_id:
+    type: string
+    reference: ${inputs.annotation_record_id}
+  source_project_id:
+    type: string
+    reference: ${inputs.source_project_id}
+  annotation:
+    type: object
+    reference: ${llm_node.output}
+
+nodes:
+  - name: prompt_template
+    type: prompt
+    source:
+      type: jinja2
+      path: annotate_project.jinja2
+    inputs:
+      annotation_record_id: ${inputs.annotation_record_id}
+      source_family: ${inputs.source_family}
+      source_id: ${inputs.source_id}
+      source_project_id: ${inputs.source_project_id}
+      source_parent_id: ${inputs.source_parent_id}
+      project_title: ${inputs.project_title}
+      project_description: ${inputs.project_description}
+      country_name: ${inputs.country_name}
+      country_iso3: ${inputs.country_iso3}
+      region_name: ${inputs.region_name}
+      commitment_year: ${inputs.commitment_year}
+      sector_code: ${inputs.sector_code}
+      sector_name: ${inputs.sector_name}
+      theme_or_intent: ${inputs.theme_or_intent}
+      infrastructure_flag: ${inputs.infrastructure_flag}
+      finance_type: ${inputs.finance_type}
+      flow_class: ${inputs.flow_class}
+      implementation_status: ${inputs.implementation_status}
+      location_text: ${inputs.location_text}
+      source_url: ${inputs.source_url}
+      recommended_for_aggregates: ${inputs.recommended_for_aggregates}
+      umbrella_flag: ${inputs.umbrella_flag}
+      text_bundle_for_annotation: ${inputs.text_bundle_for_annotation}
+
+  - name: llm_node
+    type: python
+    source:
+      type: code
+      path: llm_wrapper.py
+    inputs:
+      prompt: ${prompt_template.output}
+      deployment_name: gpt-4o-mini
+      schema_path: ./annotate_project.json
+      function_name: parsed_message
+      temperature: 0.1
+      max_tokens: 2000
+    connection: open_ai_connection

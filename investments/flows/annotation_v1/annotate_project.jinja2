@@ -1,0 +1,145 @@
+You are annotating development finance project records for a research dataset.
+
+Your task is to classify:
+1. whether the project has recipient-country local implementation; and
+2. whether it plausibly creates or supports employment-related activity.
+
+Use only the provided project text. Do not use outside knowledge.
+
+Important principle:
+Do NOT treat every non-local project as macro policy.
+"macro_policy_only" is only for policy, budget support, regulation, central-bank/liquidity support, national strategy, or central institutional reform.
+Commercial finance, import finance, vessel acquisition, corporate acquisition, donor-country training, scholarships abroad, vague cash grants, and thin/unclear records are NOT automatically macro policy.
+
+Local implementation labels:
+
+- "yes":
+  Use when the project involves recipient-country local delivery, goods, equipment, infrastructure, services, construction, training delivered locally, public works, donations to local institutions, local program delivery, or named places/sites.
+
+- "no_macro_policy":
+  Use only when the project is clearly macro/national/policy/institutional: budget support, national regulation, central government reform, central bank currency/liquidity support, national strategy, or technical assistance with no local implementation described.
+
+- "no_financial_transaction_only":
+  Use when the record is mainly a loan, credit line, import finance, buyer’s credit, syndicated loan, acquisition finance, refinancing, currency swap, or corporate transaction, and the text does not describe recipient-country local implementation.
+
+- "no_donor_country_activity":
+  Use when the activity occurs primarily in China or another donor country, such as foreign officials attending training in China, scholarships abroad, study visits, or overseas seminars, and the text does not describe recipient-country implementation.
+
+- "mixed":
+  Use when the project combines macro/national or financial components with clear recipient-country local implementation.
+
+- "unclear":
+  Use when the text is too vague to decide local implementation. Examples: vague tied project aid, unspecified cash grant, unspecified project support, unclear donation without location or recipient activity.
+
+macro_policy_only:
+Use "Yes" only if locally_implemented is "no_macro_policy".
+Use "No" for financial transactions, donor-country training, material donations, local services, local infrastructure, and unclear/vague records unless the text clearly describes macro policy.
+Use "Unclear" only when the macro-policy status is ambiguous.
+
+jobs_direct:
+Use "Yes" if the text explicitly mentions jobs, employment, workers, labor, skills training, vocational training, livelihoods, income generation, cash-for-work, public works, SME support, enterprise support, or direct work opportunities.
+
+jobs_indirect:
+Use "Yes" only if there is a concrete local/productive employment channel, such as:
+- transport access;
+- energy access or electricity supply for productive use;
+- irrigation or agricultural productivity;
+- SME/private-sector support;
+- market access;
+- construction of productive infrastructure;
+- industrial modernization;
+- reconstruction that plausibly restores productive capacity;
+- livelihood equipment or tools.
+
+Do NOT mark jobs_indirect as "Yes" merely because:
+- the project is generally beneficial;
+- the project provides humanitarian relief;
+- the project provides medical care;
+- the project donates school kits, toys, masks, vaccines, computers, or general equipment;
+- the project supports government, police, parliament, or administration;
+- the project is a loan or financial transaction without described local productive implementation.
+
+jobs_any:
+Use "Yes" if jobs_direct is "Yes" or jobs_indirect is "Yes".
+Use "No" if both jobs_direct and jobs_indirect are "No".
+Use "Unclear" only if the text is insufficient or contradictory.
+
+non_jobs:
+Use "Yes" if jobs_any is "No".
+Use "No" if jobs_any is "Yes".
+Use "Unclear" if jobs_any is "Unclear".
+
+jobs_channel:
+Choose the main mechanism:
+- "direct_employment" for explicit jobs/employment/workers.
+- "skills_training" for explicit training or skills acquisition linked to work/livelihoods.
+- "livelihoods" for livelihood support, tools, income-generating assets, productive equipment for households/groups.
+- "public_works" for cash-for-work or labor-intensive public works.
+- "sme_private_sector" for SMEs, firms, entrepreneurship, enterprise finance/support.
+- "agriculture_productivity" for farming, livestock, fisheries, rural productivity.
+- "transport_market_access" for roads, bridges, ports, transport corridors that improve market access.
+- "energy_access_productivity" for electricity, generators, power supply, grid, productive energy access.
+- "water_irrigation_productivity" for irrigation or water systems directly tied to productive use.
+- "construction_infrastructure" for construction-heavy infrastructure when no more specific productive channel fits.
+- "human_capital_health_education" only when the project clearly builds human capital relevant to future productivity; do not use this for ordinary medical care or generic donations.
+- "emergency_humanitarian_no_jobs" for disaster relief, emergency supplies, humanitarian donations, vaccines, medical supplies, food aid, or relief goods with no employment/productive channel.
+- "governance_macro_policy" for macro policy, governance reform, budget support, regulation, or central institutional reform.
+- "none" when jobs_any is "No".
+- "unclear" when jobs_any is "Unclear".
+
+Consistency rules:
+- If jobs_any is "Yes", jobs_channel must not be "none".
+- If jobs_any is "No", jobs_channel should usually be "none", "emergency_humanitarian_no_jobs", or "governance_macro_policy".
+- If locally_implemented is "no_macro_policy", macro_policy_only should be "Yes".
+- If locally_implemented is "no_financial_transaction_only" or "no_donor_country_activity", macro_policy_only should be "No".
+- If the project is vague, thin, or borderline, set confidence to "low" or "medium" and needs_second_review to "Yes".
+
+Confidence:
+- "high": clear evidence in the text and no borderline judgment.
+- "medium": reasonable classification but some ambiguity.
+- "low": vague, thin, mixed, contradictory, or uncertain text.
+
+needs_second_review:
+Use "Yes" for:
+- vague tied project aid;
+- donor-country training or scholarships;
+- financial transactions whose local implementation is unclear;
+- humanitarian/health/education cases where jobs relevance is debatable;
+- any project where locally_implemented or jobs_any is "unclear";
+- any case where you choose confidence "low".
+
+Return exactly one function-call JSON object matching the schema.
+
+Project record:
+
+annotation_record_id: {{ annotation_record_id }}
+source_family: {{ source_family }}
+source_id: {{ source_id }}
+source_project_id: {{ source_project_id }}
+source_parent_id: {{ source_parent_id }}
+
+project_title: {{ project_title }}
+project_description: {{ project_description }}
+
+country_name: {{ country_name }}
+country_iso3: {{ country_iso3 }}
+region_name: {{ region_name }}
+commitment_year: {{ commitment_year }}
+
+sector_code: {{ sector_code }}
+sector_name: {{ sector_name }}
+theme_or_intent: {{ theme_or_intent }}
+infrastructure_flag: {{ infrastructure_flag }}
+
+finance_type: {{ finance_type }}
+flow_class: {{ flow_class }}
+implementation_status: {{ implementation_status }}
+
+location_text: {{ location_text }}
+source_url: {{ source_url }}
+
+recommended_for_aggregates: {{ recommended_for_aggregates }}
+umbrella_flag: {{ umbrella_flag }}
+
+text_bundle_for_annotation:
+{{ text_bundle_for_annotation }}
