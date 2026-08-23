@@ -110,6 +110,10 @@ def normalize_acled_events(
     snapshot: SourceSnapshotRef,
 ) -> AcledSilverResult:
     """Create a lossless ACLED Silver event table without filtering source events."""
+    if snapshot.source != ACLED_SOURCE:
+        raise ValueError(
+            f"snapshot source {snapshot.source!r} does not match expected source {ACLED_SOURCE!r}"
+        )
     source_columns = _resolve_source_columns([str(column) for column in raw.columns])
     frame = pd.DataFrame(index=raw.index)
     frame["event_row_id"] = [

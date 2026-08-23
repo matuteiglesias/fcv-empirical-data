@@ -24,6 +24,7 @@ from fcv_empirical.investments.common import (
     coverage_profile,
     json_text,
     persist_contract_artifacts,
+    validate_source_snapshot,
 )
 from fcv_empirical.investments.parity import compare_unique_key_tables, legacy_dataset_ref
 
@@ -422,6 +423,12 @@ def materialize_aiddata_silver(
         workbook_path,
         release=release,
         additional_files=additional_snapshot_files,
+    )
+    validate_source_snapshot(
+        snapshot,
+        expected_source=AIDDATA_SOURCE,
+        expected_release=release,
+        required_paths=(workbook_path,),
     )
     extraction = extract_aiddata_workbook(workbook_path)
     silver_base = data_root.silver("investments", "aiddata_clg", release)
