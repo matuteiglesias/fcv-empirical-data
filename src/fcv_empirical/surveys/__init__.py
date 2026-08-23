@@ -17,7 +17,7 @@ from .dhs_gps import (
 )
 from .dhs_gps_pipeline import (
     materialize_dhs_gps_silver,
-    materialize_dhs_reported_coordinate_membership,
+    materialize_dhs_reported_coordinate_membership,)
 from .dhs_hr import (
     DHS_HR_RECODE,
     DHS_SOURCE,
