@@ -3,7 +3,9 @@ from .materialization import (
     materialize_file,
     materialize_files,
     output_path,
+    persist_run_artifact,
     persist_run_manifest,
+    run_artifact_path,
     run_path,
 )
 from .parity import build_parity_report, serialize_parity_report
@@ -16,8 +18,10 @@ __all__ = [
     "materialize_file",
     "materialize_files",
     "output_path",
+    "persist_run_artifact",
     "persist_run_manifest",
     "presence_counts",
+    "run_artifact_path",
     "run_path",
     "serialize_parity_report",
     "serialize_qa",

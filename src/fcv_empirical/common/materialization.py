@@ -21,11 +21,18 @@ MATERIALIZATION_STATUS_CHECK_ID = "materialization.status"
 
 @dataclass(frozen=True)
 class FileMaterialization:
-    """One file-shaped durable output requested by a source adapter."""
+    """One file-shaped durable output requested by a source adapter.
+
+    ``destination_base`` is optional. When omitted, the artifact is published under
+    the run directory. When supplied, it must live inside the shared ``DataRoot``;
+    this lets source adapters publish canonical Silver/Gold products while retaining
+    the same staging, hashing, overwrite, failure, and manifest behavior.
+    """
 
     dataset: DatasetRef
     relative_path: str | PurePosixPath
     writer: Callable[[Path], None]
+    destination_base: Path | None = None
 
 
 def _package_version() -> str:
@@ -60,13 +67,22 @@ def run_path(data_root: DataRoot, run_id: str) -> Path:
     return data_root.run(RUN_NAMESPACE, _component(run_id))
 
 
+def run_artifact_path(
+    data_root: DataRoot,
+    run_id: str,
+    relative_path: str | PurePosixPath,
+) -> Path:
+    """Return a confined path for a non-dataset run artifact."""
+    return run_path(data_root, run_id) / "artifacts" / _relative_path(relative_path)
+
+
 def output_path(
     data_root: DataRoot,
     run_id: str,
     dataset: DatasetRef,
     relative_path: str | PurePosixPath,
 ) -> Path:
-    """Construct a deterministic path for one durable output file."""
+    """Construct a deterministic run-scoped path for one durable output file."""
     return (
         run_path(data_root, run_id)
         / "outputs"
@@ -75,6 +91,21 @@ def output_path(
         / _component(dataset.version)
         / _relative_path(relative_path)
     )
+
+
+def _destination_for(
+    data_root: DataRoot,
+    run_id: str,
+    request: FileMaterialization,
+) -> Path:
+    if request.destination_base is None:
+        return output_path(data_root, run_id, request.dataset, request.relative_path)
+
+    root = data_root.root.resolve()
+    base = Path(request.destination_base).expanduser().resolve()
+    if base != root and root not in base.parents:
+        raise ValueError("stable destination_base must remain inside the shared DataRoot")
+    return base / _relative_path(request.relative_path)
 
 
 def _publish_staged(staged: Path, destination: Path, *, overwrite: bool) -> None:
@@ -118,6 +149,20 @@ def persist_run_manifest(
     return path
 
 
+def persist_run_artifact(
+    data_root: DataRoot,
+    run_id: str,
+    relative_path: str | PurePosixPath,
+    content: str,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Persist a deterministic text/JSON sidecar under the run artifact namespace."""
+    path = run_artifact_path(data_root, run_id, relative_path)
+    _atomic_write_text(path, content, overwrite=overwrite)
+    return path
+
+
 def _status_result(
     *,
     state: str,
@@ -150,10 +195,27 @@ def _validate_caller_qa(qa: Iterable[QAResult]) -> tuple[QAResult, ...]:
     return results
 
 
+def _resolve_inputs(
+    *,
+    source_snapshot: SourceSnapshotRef | None,
+    inputs: Iterable[SourceSnapshotRef | DatasetRef] | None,
+) -> tuple[SourceSnapshotRef | DatasetRef, ...]:
+    if source_snapshot is not None and inputs is not None:
+        raise ValueError("provide either source_snapshot or inputs, not both")
+    if source_snapshot is not None:
+        return (source_snapshot,)
+    if inputs is None:
+        raise ValueError("materialization requires source_snapshot or inputs")
+    refs = tuple(inputs)
+    if not refs:
+        raise ValueError("materialization inputs must be non-empty")
+    return refs
+
+
 def _failed_manifest(
     *,
     run_id: str,
-    source_snapshot: SourceSnapshotRef,
+    input_refs: tuple[SourceSnapshotRef | DatasetRef, ...],
     parameters: Mapping[str, Any],
     code_commit: str | None,
     started_at: datetime,
@@ -169,7 +231,7 @@ def _failed_manifest(
         code_commit=code_commit,
         started_at=started_at,
         finished_at=_utcnow(),
-        inputs=(source_snapshot,),
+        inputs=input_refs,
         parameters=dict(parameters),
         outputs=(),
         qa=(
@@ -213,8 +275,9 @@ def materialize_files(
     *,
     data_root: DataRoot,
     run_id: str,
-    source_snapshot: SourceSnapshotRef,
     outputs: Iterable[FileMaterialization],
+    source_snapshot: SourceSnapshotRef | None = None,
+    inputs: Iterable[SourceSnapshotRef | DatasetRef] | None = None,
     parameters: Mapping[str, Any] | None = None,
     code_commit: str | None = None,
     qa: Iterable[QAResult] = (),
@@ -222,23 +285,26 @@ def materialize_files(
 ) -> RunManifest:
     """Materialize one or more files under one shared upstream RunManifest.
 
-    All writers finish and all hashes validate before publication begins. With the
-    default no-overwrite policy, publication is no-clobber and published files are
-    removed if a later publication or manifest write fails. Explicit overwrite is
-    destructive and cannot promise rollback of prior artifacts.
+    All writers finish and all hashes validate before publication begins. Outputs
+    may remain run-scoped or publish into a stable directory inside ``DataRoot``.
+    With the default no-overwrite policy, publication is no-clobber and files
+    published by the failing call are removed if later publication or manifest
+    writing fails. Explicit overwrite is destructive and cannot promise rollback.
+
+    Source rebuilds normally provide ``source_snapshot``. Derived products may
+    instead provide upstream ``DatasetRef`` objects via ``inputs`` so lineage says
+    Silver -> derived rather than pretending the derived view read Bronze directly.
     """
     requests = tuple(outputs)
     if not requests:
         raise ValueError("at least one output materialization is required")
 
+    input_refs = _resolve_inputs(source_snapshot=source_snapshot, inputs=inputs)
     caller_qa = _validate_caller_qa(qa)
     params = dict(parameters or {})
     started_at = _utcnow()
     manifest_destination = run_path(data_root, run_id) / "run_manifest.json"
-    destinations = tuple(
-        output_path(data_root, run_id, request.dataset, request.relative_path)
-        for request in requests
-    )
+    destinations = tuple(_destination_for(data_root, run_id, request) for request in requests)
     if len(set(destinations)) != len(destinations):
         raise ValueError("multiple requested outputs resolve to the same destination")
     if not overwrite:
@@ -269,7 +335,7 @@ def materialize_files(
             code_commit=code_commit,
             started_at=started_at,
             finished_at=_utcnow(),
-            inputs=(source_snapshot,),
+            inputs=input_refs,
             parameters=params,
             outputs=hashed_outputs,
             qa=(
@@ -294,7 +360,7 @@ def materialize_files(
         if not manifest_destination.exists() or overwrite:
             failure = _failed_manifest(
                 run_id=run_id,
-                source_snapshot=source_snapshot,
+                input_refs=input_refs,
                 parameters=params,
                 code_commit=code_commit,
                 started_at=started_at,
@@ -314,10 +380,12 @@ def materialize_file(
     *,
     data_root: DataRoot,
     run_id: str,
-    source_snapshot: SourceSnapshotRef,
     output: DatasetRef,
     relative_path: str | PurePosixPath,
     writer: Callable[[Path], None],
+    source_snapshot: SourceSnapshotRef | None = None,
+    inputs: Iterable[SourceSnapshotRef | DatasetRef] | None = None,
+    destination_base: Path | None = None,
     parameters: Mapping[str, Any] | None = None,
     code_commit: str | None = None,
     qa: Iterable[QAResult] = (),
@@ -328,8 +396,14 @@ def materialize_file(
         data_root=data_root,
         run_id=run_id,
         source_snapshot=source_snapshot,
+        inputs=inputs,
         outputs=(
-            FileMaterialization(dataset=output, relative_path=relative_path, writer=writer),
+            FileMaterialization(
+                dataset=output,
+                relative_path=relative_path,
+                writer=writer,
+                destination_base=destination_base,
+            ),
         ),
         parameters=parameters,
         code_commit=code_commit,
