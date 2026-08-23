@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fcv-empirical-data"
+version = "0.1.0"
+description = "FCV empirical-data domain kernel for reproducible source materialization"
+requires-python = ">=3.10"
+dependencies = [
+  "empirical-data-contracts>=0.1,<0.2",
+  "spatial-data-foundation @ git+https://github.com/matuteiglesias/spatial-data-foundation.git@49b593293176aa53ea4c218442aa5cdabf4a1489",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["fcv_empirical*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
