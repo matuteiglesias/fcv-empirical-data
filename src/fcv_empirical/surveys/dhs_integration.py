@@ -73,13 +73,16 @@ def _validate_survey_identity(
     return missing, observed
 
 
-def _cluster_values(frame: pd.DataFrame, column: str) -> set[str]:
+def _cluster_values(frame: pd.DataFrame, column: str) -> tuple[set[str], int]:
     values: set[str] = set()
+    missing = 0
     for value in frame[column]:
         normalized = normalize_cluster_identity(value)
-        if pd.notna(normalized):
+        if pd.isna(normalized):
+            missing += 1
+        else:
             values.add(str(normalized))
-    return values
+    return values, missing
 
 
 def _gc_link_column(frame: pd.DataFrame) -> str:
@@ -112,7 +115,10 @@ def _snapshot_ids(frame: pd.DataFrame) -> tuple[str, ...]:
     return tuple(sorted(value for value in set(values) if value))
 
 
-def _validate_dataset_refs(datasets: dict[str, DatasetRef] | None) -> dict[str, DatasetRef]:
+def _validate_dataset_refs(
+    datasets: dict[str, DatasetRef] | None,
+    frames: dict[str, pd.DataFrame],
+) -> dict[str, DatasetRef]:
     if datasets is None:
         return {}
     unknown = sorted(set(datasets) - set(_EXPECTED_DATASET_IDS))
@@ -124,6 +130,21 @@ def _validate_dataset_refs(datasets: dict[str, DatasetRef] | None) -> dict[str, 
             raise ValueError(
                 f"DHS integration role {role!r} requires dataset_id {expected!r}, "
                 f"got {dataset.dataset_id!r}"
+            )
+        frame = frames[role]
+        grain_columns = list(dataset.grain.keys)
+        missing = sorted(set(grain_columns) - set(frame.columns))
+        if missing:
+            raise ValueError(
+                f"DHS {role} DatasetRef grain columns are absent from the supplied product: "
+                + ", ".join(missing)
+            )
+        grain_frame = frame[grain_columns]
+        if grain_frame.isna().any(axis=None):
+            raise ValueError(f"DHS {role} DatasetRef grain contains missing key values")
+        if grain_frame.duplicated().any():
+            raise ValueError(
+                f"DHS {role} DatasetRef grain does not uniquely identify supplied rows"
             )
     return dict(datasets)
 
@@ -140,6 +161,7 @@ def build_dhs_survey_integration_report(
     if survey.source_family.casefold() != "dhs":
         raise ValueError("DHS survey integration requires a DHS SurveyCatalogEntry")
 
+    frames = {"hr": hr, "gps": gps, "gc": gc}
     for name, frame in (("HR", hr), ("GPS", gps), ("GC", gc)):
         _validate_survey_identity(frame, name=name, survey=survey)
 
@@ -147,10 +169,11 @@ def build_dhs_survey_integration_report(
     _require_columns(gps, name="GPS", columns={"cluster_id"})
     _require_columns(gc, name="GC", columns={"cluster_id"})
 
+    validated_datasets = _validate_dataset_refs(datasets, frames)
     gc_link_column = _gc_link_column(gc)
-    hr_clusters = _cluster_values(hr, "cluster_id")
-    gps_clusters = _cluster_values(gps, "cluster_id")
-    gc_clusters = _cluster_values(gc, gc_link_column)
+    hr_clusters, hr_missing_clusters = _cluster_values(hr, "cluster_id")
+    gps_clusters, gps_missing_clusters = _cluster_values(gps, "cluster_id")
+    gc_clusters, gc_missing_clusters = _cluster_values(gc, gc_link_column)
 
     union = sorted(hr_clusters | gps_clusters | gc_clusters)
     support = pd.DataFrame(
@@ -183,6 +206,7 @@ def build_dhs_survey_integration_report(
         int(not (row.in_hr and row.in_gps and row.in_gc))
         for row in support.itertuples(index=False)
     )
+    missing_cluster_rows = hr_missing_clusters + gps_missing_clusters + gc_missing_clusters
 
     summary: dict[str, Any] = {
         "survey_id": survey.survey_id,
@@ -190,19 +214,23 @@ def build_dhs_survey_integration_report(
         "survey_year": survey.survey_year,
         "hr_household_rows": len(hr),
         "hr_cluster_count": len(hr_clusters),
+        "hr_missing_cluster_rows": hr_missing_clusters,
         "gps_cluster_rows": len(gps),
         "gps_cluster_count": len(gps_clusters),
+        "gps_missing_cluster_rows": gps_missing_clusters,
         "gc_cluster_rows": len(gc),
         "gc_cluster_count": len(gc_clusters),
+        "gc_missing_link_cluster_rows": gc_missing_clusters,
         "gc_link_key_basis": gc_link_column,
         "hr_snapshot_ids": _snapshot_ids(hr),
         "gps_snapshot_ids": _snapshot_ids(gps),
         "gc_snapshot_ids": _snapshot_ids(gc),
+        "dataset_refs_checked": tuple(sorted(validated_datasets)),
         "numeric_equivalent_but_text_distinct_pairs": numeric_aliases,
         **pair_counts,
     }
 
-    support_state = "GREEN" if incomplete_support == 0 else "YELLOW"
+    support_state = "GREEN" if incomplete_support == 0 and missing_cluster_rows == 0 else "YELLOW"
     normalization_state = "GREEN" if total_aliases == 0 else "YELLOW"
     qa = (
         QAResult(
@@ -217,6 +245,15 @@ def build_dhs_survey_integration_report(
             },
         ),
         QAResult(
+            check_id="dhs.integration.dataset_grain",
+            state="GREEN",
+            message=(
+                "supplied DatasetRef grain keys are checked against actual rows; a declared grain "
+                "that is missing or non-unique cannot enter integrated DHS evidence"
+            ),
+            metrics={"dataset_refs_checked": len(validated_datasets)},
+        ),
+        QAResult(
             check_id="dhs.integration.cluster_support",
             state=support_state,
             message=(
@@ -226,6 +263,7 @@ def build_dhs_survey_integration_report(
             metrics={
                 "union_cluster_count": len(union),
                 "incomplete_support_clusters": incomplete_support,
+                "missing_cluster_identity_rows": missing_cluster_rows,
                 **pair_counts,
             },
         ),
@@ -250,7 +288,7 @@ def build_dhs_survey_integration_report(
         cluster_support=support,
         summary=summary,
         qa=qa,
-        datasets=_validate_dataset_refs(datasets),
+        datasets=validated_datasets,
     )
 
 
