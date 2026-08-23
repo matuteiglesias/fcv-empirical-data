@@ -53,6 +53,30 @@ For investment data specifically:
 - annotation candidates are L2 derived review views built from Silver. Their convenience fields cannot
   mutate Silver or become canonical source meaning.
 
+## Violence vertical firewall
+
+ACLED and UCDP are independent source systems. Do not concatenate, splice, deduplicate, or harmonize
+them without an explicit versioned reconciliation product.
+
+For ACLED specifically:
+
+- Silver retains every supplied source event row;
+- `GEO_PRECISION` remains source data and is never an implicit Silver filter;
+- zero-fatality events remain events and must survive Silver;
+- preserve native event and sub-event taxonomies plus the source event identifier;
+- malformed/missing fatalities remain missing/invalid measurements, never zero by coercion;
+- event-to-geography membership is a separate relation produced through `spatial-data-foundation`;
+- boundary and overlapping-polygon cases remain ambiguous until an explicit measurement policy acts;
+- do not duplicate an ambiguous event into several Gold geography cells;
+- period membership uses the shared `PeriodIndex`, never local `T`/`y0` arithmetic;
+- sparse Gold row absence remains unknown unless an explicit `CoverageContract` licenses zero;
+- observed min/max event dates describe the supplied snapshot; they do not prove complete source
+  coverage;
+- native ACLED event types remain the Gold taxonomy in the source-specific vertical;
+- legacy `GEO_PRECISION == 1`, zero-fatality dropping, and wide death-column behavior may be recreated
+  only in explicitly named parity/legacy-compatibility diagnostics, never in authoritative Silver;
+- do not introduce UCDP or experiment-harness outcome semantics into the ACLED source vertical.
+
 ## Required upstream reuse
 
 Use public models from `empirical-data-contracts`, especially `SourceSnapshotRef`, `DatasetRef`,
