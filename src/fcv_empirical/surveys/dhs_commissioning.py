@@ -82,6 +82,12 @@ class DhsCommissioningSpec:
             numeric = float(value)
             if not math.isfinite(numeric) or numeric < 0 or numeric > 100:
                 raise ValueError("expected percentages must be finite values in [0, 100]")
+        unknown_targets = sorted(set(self.category_map.values()) - set(self.expected_percentages))
+        if unknown_targets:
+            raise ValueError(
+                "category_map targets must be declared reference cells: "
+                + ", ".join(unknown_targets)
+            )
         if self.domain_variable is None and self.domain_allowed_values:
             raise ValueError("domain_allowed_values require domain_variable")
         if self.domain_variable is not None and not self.domain_allowed_values:
@@ -268,9 +274,11 @@ def _commission_one(
     if len(joined) != len(hr):
         raise ValueError(f"{spec.benchmark_id}: commissioning join lost HR rows")
 
+    source_weight_values = joined["source_weight_variable"]
+    if source_weight_values.isna().any():
+        raise ValueError(f"{spec.benchmark_id}: source weight variable is missing on HR rows")
     source_weight_tokens = {
-        str(value).casefold()
-        for value in joined["source_weight_variable"].dropna().astype("string").tolist()
+        str(value).casefold() for value in source_weight_values.astype("string").tolist()
     }
     if source_weight_tokens != {spec.expected_source_weight_variable.casefold()}:
         raise ValueError(
