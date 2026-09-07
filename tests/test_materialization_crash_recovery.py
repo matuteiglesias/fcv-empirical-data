@@ -14,8 +14,8 @@ from spatial_foundation import DataRoot
 
 from fcv_empirical.common import materialization
 from fcv_empirical.common.materialization import (
-    FileMaterialization,
     PUBLICATION_TRANSACTION_FILE,
+    FileMaterialization,
     materialize_file,
     materialize_files,
     output_path,
