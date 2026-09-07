@@ -17,6 +17,8 @@ from spatial_foundation import DataRoot, sha256_file
 PACKAGE_NAME = "fcv-empirical-data"
 RUN_NAMESPACE = "fcv-empirical-data"
 MATERIALIZATION_STATUS_CHECK_ID = "materialization.status"
+PUBLICATION_TRANSACTION_FILE = "publication_transaction.json"
+PUBLICATION_TRANSACTION_SCHEMA = "fcv-materialization-publication-v1"
 
 
 @dataclass(frozen=True)
@@ -246,6 +248,38 @@ def _failed_manifest(
     )
 
 
+def _success_manifest(
+    *,
+    run_id: str,
+    input_refs: tuple[SourceSnapshotRef | DatasetRef, ...],
+    parameters: Mapping[str, Any],
+    code_commit: str | None,
+    started_at: datetime,
+    qa: tuple[QAResult, ...],
+    outputs: tuple[DatasetRef, ...],
+) -> RunManifest:
+    return RunManifest(
+        run_id=run_id,
+        package=PACKAGE_NAME,
+        package_version=_package_version(),
+        code_commit=code_commit,
+        started_at=started_at,
+        finished_at=_utcnow(),
+        inputs=input_refs,
+        parameters=dict(parameters),
+        outputs=outputs,
+        qa=(
+            *qa,
+            _status_result(
+                state="GREEN",
+                message="materialization completed",
+                requested_output_count=len(outputs),
+                published_output_count=len(outputs),
+            ),
+        ),
+    )
+
+
 def _stage_output(
     request: FileMaterialization,
     destination: Path,
@@ -271,6 +305,202 @@ def _stage_output(
         raise
 
 
+def _publication_transaction_path(data_root: DataRoot, run_id: str) -> Path:
+    return run_path(data_root, run_id) / PUBLICATION_TRANSACTION_FILE
+
+
+def _destination_relative_to_root(data_root: DataRoot, destination: Path) -> str:
+    root = data_root.root.resolve()
+    resolved = destination.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError("publication transaction destination must remain inside the shared DataRoot")
+    return resolved.relative_to(root).as_posix()
+
+
+def _resolve_transaction_destination(data_root: DataRoot, relative: str) -> Path:
+    root = data_root.root.resolve()
+    candidate = (root / _relative_path(relative)).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise RuntimeError("publication transaction destination escapes the shared DataRoot")
+    return candidate
+
+
+def _dataset_identity_without_hash(dataset: DatasetRef) -> dict[str, Any]:
+    payload = dataset.model_dump(mode="json")
+    payload["content_sha256"] = None
+    return payload
+
+
+def _persist_publication_transaction(
+    *,
+    data_root: DataRoot,
+    run_id: str,
+    manifest: RunManifest,
+    destinations: tuple[Path, ...],
+) -> Path:
+    if len(destinations) != len(manifest.outputs):
+        raise RuntimeError("publication transaction output count does not match manifest")
+    entries = []
+    for destination, dataset in zip(destinations, manifest.outputs, strict=True):
+        if dataset.content_sha256 is None:
+            raise RuntimeError("publication transaction requires hashed output DatasetRefs")
+        entries.append(
+            {
+                "dataset_id": dataset.dataset_id,
+                "destination": _destination_relative_to_root(data_root, destination),
+                "sha256": dataset.content_sha256,
+            }
+        )
+    payload = {
+        "schema_version": PUBLICATION_TRANSACTION_SCHEMA,
+        "run_id": run_id,
+        "manifest": manifest.model_dump(mode="json"),
+        "outputs": entries,
+    }
+    path = _publication_transaction_path(data_root, run_id)
+    _atomic_write_text(
+        path,
+        json.dumps(payload, sort_keys=True, indent=2) + "\n",
+        overwrite=False,
+    )
+    return path
+
+
+def _load_publication_transaction(
+    *,
+    data_root: DataRoot,
+    run_id: str,
+) -> tuple[RunManifest, tuple[dict[str, str], ...]]:
+    path = _publication_transaction_path(data_root, run_id)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as error:
+        raise RuntimeError(f"invalid publication transaction for run {run_id!r}") from error
+    if payload.get("schema_version") != PUBLICATION_TRANSACTION_SCHEMA:
+        raise RuntimeError("unsupported publication transaction schema")
+    if payload.get("run_id") != run_id:
+        raise RuntimeError("publication transaction run_id does not match requested run")
+    try:
+        manifest = RunManifest.model_validate(payload["manifest"])
+    except Exception as error:
+        raise RuntimeError("publication transaction contains an invalid RunManifest") from error
+    raw_entries = payload.get("outputs")
+    if not isinstance(raw_entries, list) or len(raw_entries) != len(manifest.outputs):
+        raise RuntimeError("publication transaction output metadata is incomplete")
+    entries: list[dict[str, str]] = []
+    for raw, dataset in zip(raw_entries, manifest.outputs, strict=True):
+        if not isinstance(raw, dict):
+            raise RuntimeError("publication transaction output entry is invalid")
+        destination = raw.get("destination")
+        digest = raw.get("sha256")
+        dataset_id = raw.get("dataset_id")
+        if not isinstance(destination, str) or not isinstance(digest, str):
+            raise RuntimeError("publication transaction output entry is incomplete")
+        if dataset_id != dataset.dataset_id or digest != dataset.content_sha256:
+            raise RuntimeError("publication transaction output metadata disagrees with manifest")
+        entries.append(
+            {"destination": destination, "sha256": digest, "dataset_id": str(dataset_id)}
+        )
+    return manifest, tuple(entries)
+
+
+def _validate_recovery_request(
+    *,
+    prepared: RunManifest,
+    entries: tuple[dict[str, str], ...],
+    input_refs: tuple[SourceSnapshotRef | DatasetRef, ...],
+    parameters: Mapping[str, Any],
+    code_commit: str | None,
+    requests: tuple[FileMaterialization, ...],
+    destinations: tuple[Path, ...],
+    data_root: DataRoot,
+) -> None:
+    if prepared.inputs != input_refs:
+        raise RuntimeError("publication recovery inputs do not match the prepared transaction")
+    if prepared.parameters != dict(parameters):
+        raise RuntimeError("publication recovery parameters do not match the prepared transaction")
+    if prepared.code_commit != code_commit:
+        raise RuntimeError("publication recovery code_commit does not match the prepared transaction")
+    if len(requests) != len(prepared.outputs) or len(destinations) != len(entries):
+        raise RuntimeError("publication recovery output count does not match the prepared transaction")
+    for request, prepared_dataset, destination, entry in zip(
+        requests, prepared.outputs, destinations, entries, strict=True
+    ):
+        if _dataset_identity_without_hash(request.dataset) != _dataset_identity_without_hash(
+            prepared_dataset
+        ):
+            raise RuntimeError("publication recovery DatasetRef does not match prepared transaction")
+        relative = _destination_relative_to_root(data_root, destination)
+        if relative != entry["destination"]:
+            raise RuntimeError("publication recovery destination does not match prepared transaction")
+
+
+def _recover_publication_transaction(
+    *,
+    data_root: DataRoot,
+    run_id: str,
+    manifest_destination: Path,
+    input_refs: tuple[SourceSnapshotRef | DatasetRef, ...],
+    parameters: Mapping[str, Any],
+    code_commit: str | None,
+    requests: tuple[FileMaterialization, ...],
+    destinations: tuple[Path, ...],
+) -> RunManifest | None:
+    transaction_path = _publication_transaction_path(data_root, run_id)
+    if not transaction_path.exists():
+        return None
+
+    prepared, entries = _load_publication_transaction(data_root=data_root, run_id=run_id)
+    _validate_recovery_request(
+        prepared=prepared,
+        entries=entries,
+        input_refs=input_refs,
+        parameters=parameters,
+        code_commit=code_commit,
+        requests=requests,
+        destinations=destinations,
+        data_root=data_root,
+    )
+
+    if manifest_destination.exists():
+        try:
+            persisted = RunManifest.model_validate_json(
+                manifest_destination.read_text(encoding="utf-8")
+            )
+        except Exception as error:
+            raise RuntimeError("existing run manifest is invalid during publication recovery") from error
+        if persisted != prepared:
+            raise RuntimeError("existing run manifest disagrees with prepared publication transaction")
+        transaction_path.unlink()
+        return persisted
+
+    existing: list[Path] = []
+    missing = 0
+    for entry in entries:
+        destination = _resolve_transaction_destination(data_root, entry["destination"])
+        if not destination.exists():
+            missing += 1
+            continue
+        if not destination.is_file():
+            raise RuntimeError("publication recovery destination exists but is not a regular file")
+        digest = sha256_file(destination)
+        if digest != entry["sha256"]:
+            raise RuntimeError(
+                "publication recovery found destination content that does not match prepared hash"
+            )
+        existing.append(destination)
+
+    if missing == 0:
+        persist_run_manifest(data_root, prepared, overwrite=False)
+        transaction_path.unlink()
+        return prepared
+
+    for destination in existing:
+        destination.unlink()
+    transaction_path.unlink()
+    return None
+
+
 def materialize_files(
     *,
     data_root: DataRoot,
@@ -287,9 +517,14 @@ def materialize_files(
 
     All writers finish and all hashes validate before publication begins. Outputs
     may remain run-scoped or publish into a stable directory inside ``DataRoot``.
-    With the default no-overwrite policy, publication is no-clobber and files
-    published by the failing call are removed if later publication or manifest
-    writing fails. Explicit overwrite is destructive and cannot promise rollback.
+
+    Default no-overwrite publication is both exception-atomic and recoverable across
+    abrupt process death. After staging/hashing, a small durable publication
+    transaction is written before canonical outputs are linked into place. A later
+    invocation with the same run identity can roll forward a fully published,
+    hash-matching transaction without recomputation, or remove only hash-verified
+    partial publications before retrying. Unknown/mismatched destination bytes fail
+    closed. Explicit overwrite remains destructive and cannot promise crash rollback.
 
     Source rebuilds normally provide ``source_snapshot``. Derived products may
     instead provide upstream ``DatasetRef`` objects via ``inputs`` so lineage says
@@ -304,10 +539,24 @@ def materialize_files(
     params = dict(parameters or {})
     started_at = _utcnow()
     manifest_destination = run_path(data_root, run_id) / "run_manifest.json"
+    transaction_destination = _publication_transaction_path(data_root, run_id)
     destinations = tuple(_destination_for(data_root, run_id, request) for request in requests)
     if len(set(destinations)) != len(destinations):
         raise ValueError("multiple requested outputs resolve to the same destination")
+
     if not overwrite:
+        recovered = _recover_publication_transaction(
+            data_root=data_root,
+            run_id=run_id,
+            manifest_destination=manifest_destination,
+            input_refs=input_refs,
+            parameters=params,
+            code_commit=code_commit,
+            requests=requests,
+            destinations=destinations,
+        )
+        if recovered is not None:
+            return recovered
         if manifest_destination.exists():
             raise FileExistsError(
                 f"refusing to overwrite existing artifact: {manifest_destination}"
@@ -318,43 +567,46 @@ def materialize_files(
 
     staged_outputs: list[tuple[Path, Path, DatasetRef]] = []
     published: list[Path] = []
+    transaction_prepared = False
     try:
         for request, destination in zip(requests, destinations, strict=True):
             staged, hashed_dataset = _stage_output(request, destination)
             staged_outputs.append((staged, destination, hashed_dataset))
 
+        hashed_outputs = tuple(dataset for _staged, _destination, dataset in staged_outputs)
+        manifest = _success_manifest(
+            run_id=run_id,
+            input_refs=input_refs,
+            parameters=params,
+            code_commit=code_commit,
+            started_at=started_at,
+            qa=caller_qa,
+            outputs=hashed_outputs,
+        )
+        if not overwrite:
+            _persist_publication_transaction(
+                data_root=data_root,
+                run_id=run_id,
+                manifest=manifest,
+                destinations=destinations,
+            )
+            transaction_prepared = True
+
         for staged, destination, _dataset in staged_outputs:
             _publish_staged(staged, destination, overwrite=overwrite)
             published.append(destination)
 
-        hashed_outputs = tuple(dataset for _staged, _destination, dataset in staged_outputs)
-        manifest = RunManifest(
-            run_id=run_id,
-            package=PACKAGE_NAME,
-            package_version=_package_version(),
-            code_commit=code_commit,
-            started_at=started_at,
-            finished_at=_utcnow(),
-            inputs=input_refs,
-            parameters=params,
-            outputs=hashed_outputs,
-            qa=(
-                *caller_qa,
-                _status_result(
-                    state="GREEN",
-                    message="materialization completed",
-                    requested_output_count=len(requests),
-                    published_output_count=len(hashed_outputs),
-                ),
-            ),
-        )
         persist_run_manifest(data_root, manifest, overwrite=overwrite)
+        if transaction_prepared:
+            transaction_destination.unlink()
         return manifest
     except Exception as error:
         if not overwrite:
             for path in published:
                 path.unlink(missing_ok=True)
             durable_published_count = 0
+            if transaction_prepared:
+                transaction_destination.unlink(missing_ok=True)
         else:
             durable_published_count = len(published)
         if not manifest_destination.exists() or overwrite:
