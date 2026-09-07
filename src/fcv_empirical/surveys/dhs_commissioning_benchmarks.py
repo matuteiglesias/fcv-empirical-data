@@ -124,6 +124,21 @@ def uganda_2016_commissioning_specs() -> tuple[DhsCommissioningSpec, ...]:
             expected_percentages={"no": 71.4, "yes": 28.6},
             category_map={"false": "no", "true": "yes"},
         ),
+        DhsCommissioningSpec(
+            benchmark_id="dhs.ug2016.de_jure_electricity.national",
+            survey_id="dhs-UG2016DHS",
+            measurement_id="dhs.household.electricity_access",
+            reference_authority="The DHS Program",
+            reference_publication="Uganda Demographic and Health Survey 2016",
+            reference_publication_id="FR333",
+            reference_url="https://www.dhsprogram.com/Pubs/Pdf/Fr333/Fr333.Pdf",
+            reference_table="2.4 Household characteristics",
+            reference_page=23,
+            expected_percentages={"no": 73.3, "yes": 26.7},
+            category_map={"false": "no", "true": "yes"},
+            population_multiplier_variable="HV012",
+            notes=("National de jure population; effective weight is HV005 x HV012.",),
+        ),
     )
 
 
@@ -141,6 +156,21 @@ def zambia_2018_commissioning_specs() -> tuple[DhsCommissioningSpec, ...]:
             reference_page=22,
             expected_percentages={"no": 65.8, "yes": 34.2},
             category_map={"false": "no", "true": "yes"},
+        ),
+        DhsCommissioningSpec(
+            benchmark_id="dhs.zm2018.de_jure_electricity.national",
+            survey_id="dhs-ZM2018DHS",
+            measurement_id="dhs.household.electricity_access",
+            reference_authority="The DHS Program",
+            reference_publication="Zambia Demographic and Health Survey 2018",
+            reference_publication_id="FR361",
+            reference_url="https://www.dhsprogram.com/pubs/pdf/FR361/FR361.pdf",
+            reference_table="2.4 Household characteristics",
+            reference_page=22,
+            expected_percentages={"no": 67.2, "yes": 32.8},
+            category_map={"false": "no", "true": "yes"},
+            population_multiplier_variable="HV012",
+            notes=("National de jure population; effective weight is HV005 x HV012.",),
         ),
     )
 
