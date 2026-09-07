@@ -9,7 +9,7 @@ def nigeria_2018_commissioning_specs(
     *,
     water_category_map: Mapping[str, str] | None = None,
 ) -> tuple[DhsCommissioningSpec, ...]:
-    """Return the three predeclared Nigeria 2018 external-reference checks."""
+    """Return the four predeclared Nigeria 2018 external-reference checks."""
 
     return (
         DhsCommissioningSpec(
@@ -25,6 +25,21 @@ def nigeria_2018_commissioning_specs(
             expected_percentages={"no": 40.6, "yes": 59.4},
             category_map={"false": "no", "true": "yes"},
             notes=("National household distribution; source missing remains in the denominator.",),
+        ),
+        DhsCommissioningSpec(
+            benchmark_id="dhs.ng2018.de_jure_electricity.national",
+            survey_id="dhs-NG2018DHS",
+            measurement_id="dhs.household.electricity_access",
+            reference_authority="The DHS Program",
+            reference_publication="Nigeria Demographic and Health Survey 2018",
+            reference_publication_id="FR359",
+            reference_url="https://www.dhsprogram.com/pubs/pdf/FR359/FR359.pdf",
+            reference_table="2.4 Household characteristics",
+            reference_page=26,
+            expected_percentages={"no": 43.5, "yes": 56.5},
+            category_map={"false": "no", "true": "yes"},
+            population_multiplier_variable="HV012",
+            notes=("National de jure population; effective weight is HV005 x HV012.",),
         ),
         DhsCommissioningSpec(
             benchmark_id="dhs.ng2018.drinking_water_source.national",
