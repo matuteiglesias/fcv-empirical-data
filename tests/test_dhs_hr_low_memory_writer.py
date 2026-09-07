@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from fcv_empirical.surveys import dhs_hr_release
 from fcv_empirical.surveys import dhs_hr_low_memory_writer as low_memory
+from fcv_empirical.surveys import dhs_hr_release
 
 
 def test_low_memory_writer_is_installed_on_canonical_release_adapter():
