@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow.parquet as pq
 from empirical_contracts import (
     AuthorityLevel,
     DataLayer,
@@ -160,6 +161,59 @@ def _resolve_source_column(frame: pd.DataFrame, requested: str) -> str:
     if len(matches) != 1:
         raise ValueError(f"DHS HR Silver has ambiguous case variants for {requested!r}")
     return str(matches[0])
+
+
+def _resolve_parquet_column(
+    columns: tuple[str, ...],
+    requested: str,
+    *,
+    product: str,
+) -> str:
+    matches = [column for column in columns if column.casefold() == requested.casefold()]
+    if not matches:
+        raise ValueError(f"{product} Parquet is missing required column {requested!r}")
+    if len(matches) != 1:
+        raise ValueError(f"{product} Parquet has ambiguous case variants for {requested!r}")
+    return matches[0]
+
+
+def _commissioning_hr_projection(
+    path: Path,
+    specs: tuple[DhsCommissioningSpec, ...],
+) -> tuple[str, ...]:
+    columns = tuple(str(name) for name in pq.ParquetFile(path).schema_arrow.names)
+    requested: list[str] = [
+        "survey_id",
+        "source_row_id",
+        "source_weight_variable",
+        "source_household_weight",
+    ]
+    for spec in specs:
+        if spec.population_multiplier_variable is not None:
+            requested.append(spec.population_multiplier_variable)
+        if spec.domain_variable is not None:
+            requested.append(spec.domain_variable)
+
+    projection: list[str] = []
+    for name in requested:
+        resolved = _resolve_parquet_column(columns, name, product="DHS HR Silver")
+        if resolved not in projection:
+            projection.append(resolved)
+    return tuple(projection)
+
+
+def _commissioning_measurement_projection(path: Path) -> tuple[str, ...]:
+    columns = tuple(str(name) for name in pq.ParquetFile(path).schema_arrow.names)
+    requested = (
+        "survey_id",
+        "source_row_id",
+        "measurement_id",
+        "measurement_status",
+        "normalized_value",
+    )
+    return tuple(
+        _resolve_parquet_column(columns, name, product="DHS measurement") for name in requested
+    )
 
 
 def _validate_dataset(
@@ -532,9 +586,11 @@ def materialize_dhs_commissioning_suite(
     if sha256_file(measurement_file) != measurement_dataset.content_sha256:
         raise ValueError("DHS measurement bytes do not match the supplied DatasetRef content hash")
 
+    hr_projection = _commissioning_hr_projection(hr_file, specs)
+    measurement_projection = _commissioning_measurement_projection(measurement_file)
     result = run_dhs_commissioning_suite(
-        pd.read_parquet(hr_file),
-        pd.read_parquet(measurement_file),
+        pd.read_parquet(hr_file, columns=list(hr_projection)),
+        pd.read_parquet(measurement_file, columns=list(measurement_projection)),
         survey=survey,
         hr_dataset=hr_dataset,
         measurement_dataset=measurement_dataset,
@@ -563,6 +619,9 @@ def materialize_dhs_commissioning_suite(
             "purpose": "external_reference_commissioning",
             "benchmark_ids": [spec.benchmark_id for spec in specs],
             "commissioning_spec_sha256": result.spec_sha256,
+            "hr_read_projection": list(hr_projection),
+            "measurement_read_projection": list(measurement_projection),
+            "whole_hr_silver_loaded": False,
             "microdata_output": None,
             "joined_microdata_persisted": False,
         },
