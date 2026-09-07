@@ -2,6 +2,17 @@
 
 from .catalog import SurveyCatalogEntry, SurveyFileLink, validate_survey_file_link
 from .design import ObservationGrain, SurveyDesignRecord, WeightValue, validate_observation_grain
+from .dhs_commissioning import (
+    DhsCommissioningResult,
+    DhsCommissioningSpec,
+    materialize_dhs_commissioning_suite,
+    run_dhs_commissioning_suite,
+)
+from .dhs_commissioning_benchmarks import (
+    nigeria_2018_commissioning_specs,
+    uganda_2016_commissioning_specs,
+    zambia_2018_commissioning_specs,
+)
 from .dhs_gps import (
     DHS_GPS_SOURCE,
     POSSIBLE_GEOGRAPHY_UNDER_DISPLACEMENT,
@@ -56,6 +67,8 @@ __all__ = [
     "POSSIBLE_GEOGRAPHY_UNDER_DISPLACEMENT",
     "REPORTED_COORDINATE_MEMBERSHIP",
     "STANDARD_DHS_HR_COLUMNS",
+    "DhsCommissioningResult",
+    "DhsCommissioningSpec",
     "DhsDisplacementPolicy",
     "DhsGpsLinkageResult",
     "DhsGpsSilverResult",
@@ -81,16 +94,21 @@ __all__ = [
     "build_dhs_survey_id",
     "build_dhs_survey_integration_report",
     "iter_dhs_hr_design_records",
+    "materialize_dhs_commissioning_suite",
     "materialize_dhs_gps_silver",
     "materialize_dhs_household_measurements",
     "materialize_dhs_hr_silver",
     "materialize_dhs_reported_coordinate_membership",
+    "nigeria_2018_commissioning_specs",
     "normalize_dhs_gps_clusters",
     "normalize_dhs_hr",
     "register_dhs_gps_snapshot",
     "register_dhs_hr_snapshot",
     "registry_sha256",
+    "run_dhs_commissioning_suite",
+    "uganda_2016_commissioning_specs",
     "validate_dhs_gps_linkage",
     "validate_observation_grain",
     "validate_survey_file_link",
+    "zambia_2018_commissioning_specs",
 ]
