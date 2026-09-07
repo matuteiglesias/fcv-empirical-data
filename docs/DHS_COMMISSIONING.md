@@ -91,10 +91,10 @@ reference/spec and diagnostic sidecars.
 The durable commissioning dataset is `L2_DERIVED`. It contains aggregate reference/observed
 percentages and discrepancy diagnostics only.
 
-## Six predeclared checks
+## Eight predeclared checks
 
-The first wave exercises three empirical mechanisms and repeats the simplest mechanism across
-releases.
+The first wave exercises three empirical mechanisms and deliberately repeats household-vs-de-jure
+denominator reconstruction across the three releases where the same authoritative table exposes both.
 
 ### Nigeria 2018
 
@@ -152,13 +152,15 @@ UGHR7BFL.DAT
 UGHR7BFL.DCT
 ```
 
-`uganda_2016_commissioning_specs()` declares national household electricity against Uganda DHS 2016
+`uganda_2016_commissioning_specs()` declares two national electricity checks against Uganda DHS 2016
 Final Report `FR333`, Table 2.4, p. 23:
 
 ```text
-No = 71.4%
-Yes = 28.6%
+Households:   No = 71.4%, Yes = 28.6%
+De jure pop.: No = 73.3%, Yes = 26.7%
 ```
+
+The second uses the same electricity measurement with effective weight `HV005 x HV012`.
 
 ### Zambia 2018
 
@@ -169,13 +171,15 @@ ZMHR71FL.DAT
 ZMHR71FL.DCT
 ```
 
-`zambia_2018_commissioning_specs()` declares national household electricity against Zambia DHS 2018
+`zambia_2018_commissioning_specs()` declares two national electricity checks against Zambia DHS 2018
 Final Report `FR361`, Table 2.4, p. 22:
 
 ```text
-No = 65.8%
-Yes = 34.2%
+Households:   No = 65.8%, Yes = 34.2%
+De jure pop.: No = 67.2%, Yes = 32.8%
 ```
+
+Again, the population check differs only by the explicit `HV012` population multiplier.
 
 ## Quantitative semantics
 
