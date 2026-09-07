@@ -351,12 +351,12 @@ def test_materialization_hash_binds_inputs_and_persists_only_aggregate_evidence(
         )
 
 
-def test_predeclared_reference_catalog_has_six_checks_and_no_guessed_water_mapping():
+def test_predeclared_reference_catalog_has_eight_checks_and_no_guessed_water_mapping():
     nigeria = nigeria_2018_commissioning_specs()
     uganda = uganda_2016_commissioning_specs()
     zambia = zambia_2018_commissioning_specs()
 
-    assert len(nigeria) + len(uganda) + len(zambia) == 6
+    assert len(nigeria) + len(uganda) + len(zambia) == 8
     assert nigeria[0].expected_percentages["yes"] == 59.4
     assert nigeria[1].expected_percentages == {"no": 43.5, "yes": 56.5}
     assert nigeria[1].population_multiplier_variable == "HV012"
@@ -366,4 +366,8 @@ def test_predeclared_reference_catalog_has_six_checks_and_no_guessed_water_mappi
     assert nigeria[3].population_multiplier_variable == "HV012"
     assert nigeria[3].domain_variable == "HV025"
     assert uganda[0].expected_percentages["yes"] == 28.6
+    assert uganda[1].expected_percentages == {"no": 73.3, "yes": 26.7}
+    assert uganda[1].population_multiplier_variable == "HV012"
     assert zambia[0].expected_percentages["yes"] == 34.2
+    assert zambia[1].expected_percentages == {"no": 67.2, "yes": 32.8}
+    assert zambia[1].population_multiplier_variable == "HV012"
