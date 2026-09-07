@@ -1,73 +1,184 @@
 # DHS Household Recode (HR) Silver
 
-This vertical materializes externally stored DHS Household Recode files at their natural
+This vertical materializes externally stored DHS Household Recode releases at their natural
 **household-within-survey** grain. It is a source-data product, not a measurement or experiment
 product.
 
-## Boundary
+## Canonical source authority
 
-The flow is:
+Canonical HR ingestion no longer treats convenience CSV exports as authoritative source files.
+The governed path is the source-native fixed-width release distributed by DHS:
 
 ```text
-external authoritative HR file
-  -> SourceSnapshotRef (path + SHA-256)
-  -> verified DHS survey/file identity
-  -> source-native household Silver
-  -> QA + RunManifest
+official <release>.DAT
+        +
+distributed <release>.DCT
+        |
+        v
+verified fixed-width decoding
+        |
+        v
+source-native household table
+        |
+        v
+surveys.dhs.hr_households Silver
 ```
 
-The repository never copies DHS microdata into Git. GitHub tests use synthetic fixtures only.
-A real run may persist protected values only in the configured external data root; review material
-must be limited to non-sensitive aggregate QA, survey identity, counts, and hashes.
+The `.DAT` contains the protected household records. The matching Stata `.DCT` is the executable
+field layout: variable names, physical record number, and byte positions. Both files are registered
+in the same immutable `SourceSnapshotRef`, so the materialized dataset is bound to both the source
+bytes and the exact schema used to decode them.
+
+This migration was motivated by a real local failure mode: legacy CSV representations of several
+DHS-VII HR releases omitted standard variables that remained explicitly present in the distributed
+`.DCT`, `.DO`, `.MAP`, `.SAS`, `.SPS`, `.FRQ`, and underlying fixed-width layout. A convenience CSV
+therefore cannot establish completeness of an HR release.
+
+The former tabular materializer remains available only as
+`materialize_dhs_hr_legacy_tabular_silver` for explicit legacy/parity investigation. Package-level
+`materialize_dhs_hr_silver` now resolves to the canonical fixed-width implementation.
+
+## Public API
+
+```python
+from fcv_empirical.surveys import (
+    STANDARD_DHS_HR_COLUMNS,
+    DhsHrMetadata,
+    materialize_dhs_hr_silver,
+)
+
+snapshot, silver, manifest, dataset, output = materialize_dhs_hr_silver(
+    source_path="NGHR7BFL.DAT",
+    dictionary_path="NGHR7BFL.DCT",
+    metadata=DhsHrMetadata(..., source_file_name="NGHR7BFL.DAT"),
+    column_map=STANDARD_DHS_HR_COLUMNS,
+    data_root=data_root,
+    run_id="...",
+    code_commit="...",
+)
+```
+
+`materialize_dhs_hr_release_silver(...)` is the explicit canonical function name.
+`materialize_dhs_hr_silver(...)` is its package-level alias.
+
+The source and dictionary must:
+
+- be `.DAT` and `.DCT` respectively;
+- have the same release-file stem;
+- match the verified `DhsHrMetadata` source filename;
+- appear exactly once in the supplied snapshot;
+- retain their registered SHA-256 hashes.
+
+The fixed-width reader currently supports the single physical-record layout used by the household
+recode files commissioned here. A dictionary declaring multiple physical record numbers fails
+closed rather than being guessed into a household table.
 
 ## Identity
 
 `DhsHrMetadata` requires a verified DHS survey identifier plus country, year, phase, release,
-recode family, and exact source file name. `survey_id` is built from the verified DHS survey
-identifier, **not** inferred from the filename. A filename mismatch fails instead of guessing.
+recode family, and exact source data filename. `survey_id` is built from the verified DHS survey
+identifier, **not** inferred from the release filename.
 
-One survey may later have HR, PR, IR, GE/GPS, GC, or other files in different source snapshots.
-The HR source file is therefore linked through the S0 `SurveyFileLink`; the survey catalog itself
-is not coupled to one acquisition snapshot.
+The `.DAT` file remains the linked survey data file in `SurveyFileLink`; the `.DCT` is a companion
+schema member of the same source snapshot. Because `source_row_id` contains the source snapshot
+identity, migrating from a lossy CSV snapshot to the authoritative `.DAT + .DCT` snapshot
+intentionally creates a new physical row-identity namespace.
+
+One survey may also have PR, IR, GE/GPS, GC, and other acquisition files in independent source
+snapshots. No cross-recode identity is inferred here.
+
+## Decoding semantics
+
+`parse_dhs_stata_dictionary(...)` parses the distributed fixed-width declarations and validates:
+
+- non-empty field schema;
+- unique variable names, case-insensitively;
+- positive ordered byte positions;
+- no overlapping field ranges;
+- one physical record per household line.
+
+`read_dhs_fixed_width_dat(...)` reads source bytes by fixed byte position. Whitespace padding is
+removed from decoded field tokens; an all-whitespace field becomes missing. Leading zeros inside a
+field survive. The reader fails if a record is shorter than the dictionary width or has non-whitespace
+bytes beyond that width.
+
+All parsed dictionary variables are decoded. The ingestion layer does not select only variables used
+by the current FCV research design.
 
 ## Source-variable and design preservation
 
-The materializer adds a normalized envelope while retaining every original HR column and value.
-The release-specific `DhsHrColumnMap` is explicit at materialization time. The exported
-`STANDARD_DHS_HR_COLUMNS` reflects common DHS standard recode names (`HHID`, `HV001`, `HV005`,
-`HV021`, `HV022`) but must be checked against the survey's official recode metadata/final-report
-sample design before use.
+The materializer adds a normalized envelope while retaining every dictionary-decoded source column
+and value.
 
-The source household weight is copied unchanged. In particular, this layer does not divide the
-stored DHS weight by one million or otherwise normalize it. `SurveyDesignRecord` views expose the
-source weight, cluster, PSU, and stratum facts without selecting an estimation design.
+The release-specific `DhsHrColumnMap` remains explicit. `STANDARD_DHS_HR_COLUMNS` uses the standard
+DHS names:
 
-## QA
+```text
+HHID   household identifier
+HV001  cluster
+HV005  household sample weight
+HV021  PSU
+HV022  stratum
+```
 
-The run manifest records:
+The source household weight is copied unchanged. This layer does not divide `HV005` by one million,
+normalize weights, or select an estimator design.
+
+Standard variables such as `HV025`, `HV201`, `HV206`, `HV270`, and `HV271` remain ordinary
+source-native columns when declared by the release dictionary. Semantic interpretation remains the
+responsibility of the separate DHS variable registry.
+
+## QA and provenance
+
+Canonical fixed-width runs add explicit QA for:
+
+- canonical `.DAT + .DCT` source representation;
+- dictionary field count and maximum record width;
+- dictionary schema SHA-256;
+- complete dictionary-to-decoded-column coverage.
+
+The existing HR QA continues to record:
 
 - input and output household-row counts;
 - missing and duplicate household IDs;
-- missing cluster IDs and distinct cluster count;
-- missing PSU IDs;
+- missing cluster and PSU IDs;
 - missing, invalid, and nonpositive source weights;
 - missing stratum IDs;
-- source-column/value preservation and source-schema fingerprint.
+- source-column/value preservation;
+- source-table schema fingerprint.
 
-Duplicates and missing values remain in Silver. There is no deduplication or aggregation step.
-
-## Real local execution
-
-A caller should verify the survey metadata and design-column mapping from official DHS material,
-then call `materialize_dhs_hr_silver(...)` with the local HR path. `.dta`, `.csv`, and `.parquet`
-inputs are accepted; DHS Stata files are read with value-label conversion disabled so source codes
-remain source codes.
-
-The durable output is versioned below the shared data root under the conceptual path:
+The run additionally persists a non-sensitive dictionary schema sidecar:
 
 ```text
-silver/surveys/dhs/<survey_id>/<source_snapshot_id>/hr_households.parquet
+artifacts/mappings/dhs_hr_fixed_width_dictionary.json
 ```
 
-The `DatasetRef` has L3 rebuilt authority. Nothing in this vertical grants L4 research authority or
-assigns outcome, treatment, covariate, geography-exposure, or estimator meaning to HR variables.
+It contains field names, source storage types, byte positions, dictionary fingerprint, field count,
+and record width, but no household values.
+
+The resulting dataset remains:
+
+```text
+surveys.dhs.hr_households
+```
+
+with schema version:
+
+```text
+dhs-hr-household-silver-v3-fixed-width
+```
+
+and `L3_REBUILT` authority. Nothing in ingestion grants L4 research authority.
+
+## Protected-data boundary
+
+The repository never copies DHS microdata into Git. GitHub tests generate tiny synthetic `.DAT` and
+`.DCT` fixtures only.
+
+Real `.DAT` files and generated HR Silver remain under the configured external `DataRoot`. Review
+material may expose release identity, hashes, schema metadata, row counts, and aggregate QA, but not
+household rows, local protected paths, or identifiers.
+
+Companion documentation such as `.DO`, `.MAP`, `.SAS`, `.SPS`, `.FRQ`, and `.FRW` remains valuable
+for local release validation and code-label interpretation. It is not required to decode the HR
+fixed-width table and is therefore not added to the canonical HR snapshot merely for convenience.
