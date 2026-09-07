@@ -5,6 +5,7 @@ import pytest
 from empirical_contracts import AuthorityLevel
 from spatial_foundation import DataRoot
 
+import fcv_empirical.surveys.dhs_hr_release as dhs_hr_release
 from fcv_empirical.surveys.dhs_hr import STANDARD_DHS_HR_COLUMNS, DhsHrMetadata
 from fcv_empirical.surveys.dhs_hr_release import (
     materialize_dhs_hr_release_silver,
@@ -147,7 +148,7 @@ def test_dictionary_decoder_recovers_standard_dhs_fields(tmp_path: Path):
     assert all(str(dtype) == "string" for dtype in frame.dtypes)
 
 
-def test_canonical_materialization_binds_dat_and_dictionary(tmp_path: Path):
+def test_canonical_materialization_streams_chunks_and_binds_dat_dictionary(tmp_path: Path):
     dat, dct = _release(tmp_path)
     data_root = DataRoot.from_path(tmp_path / "data")
 
@@ -159,6 +160,7 @@ def test_canonical_materialization_binds_dat_and_dictionary(tmp_path: Path):
         data_root=data_root,
         run_id="dhs-hr-release-fixture",
         code_commit="deadbeef",
+        decode_chunk_rows=1,
     )
 
     assert len(snapshot.files) == 2
@@ -169,7 +171,10 @@ def test_canonical_materialization_binds_dat_and_dictionary(tmp_path: Path):
     assert materialized["hv206"].tolist() == ["1", "0"]
     assert materialized["hv270"].tolist() == ["5", "2"]
     assert materialized["source_row_id"].is_unique
+    assert materialized["source_row_id"].str.endswith(("000000000", "000000001")).all()
     assert silver.file_link.source_file.path.endswith("ZZHR71FL.DAT")
+    assert silver.row_count == 2
+    assert silver.source_column_count == 12
 
     assert dataset.authority == AuthorityLevel.L3_REBUILT
     assert dataset.schema_version == "dhs-hr-household-silver-v3-fixed-width"
@@ -180,13 +185,43 @@ def test_canonical_materialization_binds_dat_and_dictionary(tmp_path: Path):
     assert manifest.parameters["source_dictionary_field_count"] == 12
     assert manifest.parameters["source_dictionary_record_width"] == 38
     assert manifest.parameters["source_weight_transformation"] is None
+    assert manifest.parameters["decode_strategy"] == "bounded_row_chunks_to_parquet"
+    assert manifest.parameters["decode_chunk_rows"] == 1
+    assert manifest.parameters["whole_release_dataframe_materialized"] is False
 
     qa = {item.check_id: item for item in silver.qa}
     assert qa["dhs.hr.canonical_fixed_width_source"].state == "GREEN"
+    assert qa["dhs.hr.bounded_memory_decode"].state == "GREEN"
     assert qa["dhs.hr.dictionary_schema_coverage"].state == "GREEN"
 
     run = data_root.run("fcv-empirical-data", "dhs-hr-release-fixture")
     assert (run / "artifacts/mappings/dhs_hr_fixed_width_dictionary.json").exists()
+
+
+def test_canonical_materializer_never_calls_whole_release_dataframe_decoder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dat, dct = _release(tmp_path)
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("whole-release DataFrame decoder must not be used by materialization")
+
+    monkeypatch.setattr(dhs_hr_release, "read_dhs_fixed_width_dat", _forbidden)
+
+    _, silver, manifest, _, output = materialize_dhs_hr_release_silver(
+        source_path=dat,
+        dictionary_path=dct,
+        metadata=_metadata(),
+        column_map=STANDARD_DHS_HR_COLUMNS,
+        data_root=DataRoot.from_path(tmp_path / "data"),
+        run_id="dhs-hr-streaming-regression",
+        decode_chunk_rows=1,
+    )
+
+    assert output.exists()
+    assert silver.row_count == 2
+    assert manifest.parameters["whole_release_dataframe_materialized"] is False
 
 
 def test_canonical_materializer_refuses_lossy_tabular_source(tmp_path: Path):
