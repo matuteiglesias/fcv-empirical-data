@@ -97,14 +97,39 @@ snapshots. No cross-recode identity is inferred here.
 - no overlapping field ranges;
 - one physical record per household line.
 
-`read_dhs_fixed_width_dat(...)` reads source bytes by fixed byte position. Whitespace padding is
-removed from decoded field tokens; an all-whitespace field becomes missing. Leading zeros inside a
-field survive. A short record is right-padded only with blank bytes, matching DHS's omitted
-all-blank suffix convention; non-whitespace bytes beyond the dictionary width still fail closed.
+The decoder accepts both sized DHS `str#` declarations and the unsized `str` declarations found in
+real distributed dictionaries. A short physical record is right-padded only with blank bytes,
+matching DHS's omitted all-blank suffix convention; non-whitespace bytes beyond the dictionary width
+still fail closed.
 
 All parsed dictionary variables are decoded. The ingestion layer does not select only variables used
-by the current FCV research design. DHS release writers may omit an all-blank trailing suffix; the
-reader restores that suffix as blank padding before decoding rather than treating it as data loss.
+by the current FCV research design.
+
+### Bounded-memory canonical materialization
+
+`read_dhs_fixed_width_dat(...)` remains a convenience whole-table decoder for tiny fixtures and
+local discovery. **Canonical materialization does not call it for a real release.** A full DHS HR
+release can have thousands of dictionary fields, so constructing the complete release as one pandas
+string DataFrame is not a supported production strategy.
+
+The canonical materializer instead performs two bounded operations:
+
+1. a cheap preflight pass over the physical records that reads only the release-verified identity and
+   design fields needed for QA (`HHID`, cluster, weight, PSU and stratum); and
+2. complete dictionary decoding in bounded row chunks, with each normalized chunk written directly
+   to Parquet before the next chunk is decoded.
+
+The default chunk size is 512 household records and may be lowered explicitly through
+`decode_chunk_rows` when a host has tighter memory constraints. The complete source-native table is
+therefore durable in `hr_households.parquet`, but it is deliberately not returned as one in-memory
+pandas DataFrame.
+
+`source_row_id` remains global across chunks. Physical row numbering uses the absolute source-record
+position, so chunk boundaries cannot create duplicate row identities.
+
+The returned `DhsHrReleaseSilverResult` is a bounded-memory summary containing catalog/link, source
+column mapping, schema fingerprint, row/column counts, and QA. The durable Parquet file remains the
+complete HR Silver data product.
 
 ## Source-variable and design preservation
 
@@ -134,18 +159,19 @@ responsibility of the separate DHS variable registry.
 Canonical fixed-width runs add explicit QA for:
 
 - canonical `.DAT + .DCT` source representation;
+- bounded-memory chunked decoding with `whole_release_dataframe_materialized = false`;
 - dictionary field count and maximum record width;
 - dictionary schema SHA-256;
 - complete dictionary-to-decoded-column coverage.
 
-The existing HR QA continues to record:
+The HR QA continues to record:
 
 - input and output household-row counts;
 - missing and duplicate household IDs;
 - missing cluster and PSU IDs;
 - missing, invalid, and nonpositive source weights;
 - missing stratum IDs;
-- source-column/value preservation;
+- source-column preservation;
 - source-table schema fingerprint.
 
 The run additionally persists a non-sensitive dictionary schema sidecar:
