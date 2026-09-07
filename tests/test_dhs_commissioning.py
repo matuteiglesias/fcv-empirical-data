@@ -351,17 +351,19 @@ def test_materialization_hash_binds_inputs_and_persists_only_aggregate_evidence(
         )
 
 
-def test_predeclared_reference_catalog_has_five_checks_and_no_guessed_water_mapping():
+def test_predeclared_reference_catalog_has_six_checks_and_no_guessed_water_mapping():
     nigeria = nigeria_2018_commissioning_specs()
     uganda = uganda_2016_commissioning_specs()
     zambia = zambia_2018_commissioning_specs()
 
-    assert len(nigeria) + len(uganda) + len(zambia) == 5
+    assert len(nigeria) + len(uganda) + len(zambia) == 6
     assert nigeria[0].expected_percentages["yes"] == 59.4
-    assert nigeria[1].expected_percentages["tube_well_borehole"] == 37.2
-    assert nigeria[1].require_release_category_map is True
-    assert nigeria[1].category_map == {}
-    assert nigeria[2].population_multiplier_variable == "HV012"
-    assert nigeria[2].domain_variable == "HV025"
+    assert nigeria[1].expected_percentages == {"no": 43.5, "yes": 56.5}
+    assert nigeria[1].population_multiplier_variable == "HV012"
+    assert nigeria[2].expected_percentages["tube_well_borehole"] == 37.2
+    assert nigeria[2].require_release_category_map is True
+    assert nigeria[2].category_map == {}
+    assert nigeria[3].population_multiplier_variable == "HV012"
+    assert nigeria[3].domain_variable == "HV025"
     assert uganda[0].expected_percentages["yes"] == 28.6
     assert zambia[0].expected_percentages["yes"] == 34.2
