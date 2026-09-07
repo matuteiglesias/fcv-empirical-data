@@ -4,9 +4,10 @@ import hashlib
 import json
 import re
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 import pyarrow as pa
