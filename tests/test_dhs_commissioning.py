@@ -91,20 +91,20 @@ def _electricity() -> pd.DataFrame:
 
 
 def _electricity_spec(**updates) -> DhsCommissioningSpec:
-    payload = dict(
-        benchmark_id="dhs.synthetic.electricity",
-        survey_id="dhs-ZZ2020DHS",
-        measurement_id="dhs.household.electricity_access",
-        reference_authority="Synthetic authority",
-        reference_publication="Synthetic report",
-        reference_publication_id="SYN1",
-        reference_url="https://example.invalid/report",
-        reference_table="2.4",
-        reference_page=1,
-        expected_percentages={"no": 27.2727272727, "yes": 27.2727272727},
-        category_map={"false": "no", "true": "yes"},
-        published_decimals=9,
-    )
+    payload = {
+        "benchmark_id": "dhs.synthetic.electricity",
+        "survey_id": "dhs-ZZ2020DHS",
+        "measurement_id": "dhs.household.electricity_access",
+        "reference_authority": "Synthetic authority",
+        "reference_publication": "Synthetic report",
+        "reference_publication_id": "SYN1",
+        "reference_url": "https://example.invalid/report",
+        "reference_table": "2.4",
+        "reference_page": 1,
+        "expected_percentages": {"no": 27.2727272727, "yes": 27.2727272727},
+        "category_map": {"false": "no", "true": "yes"},
+        "published_decimals": 9,
+    }
     payload.update(updates)
     return DhsCommissioningSpec(**payload)
 
