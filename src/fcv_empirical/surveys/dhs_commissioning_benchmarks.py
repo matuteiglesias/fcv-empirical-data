@@ -55,8 +55,10 @@ def nigeria_2018_commissioning_specs(
             category_map=dict(water_category_map or {}),
             require_release_category_map=True,
             notes=(
-                "Release-local HV201 code-to-report-cell mapping must be verified "
-                "before execution.",
+                (
+                    "Release-local HV201 code-to-report-cell mapping must be verified "
+                    "before execution."
+                ),
                 "This benchmark does not infer improved/unimproved drinking-water semantics.",
             ),
         ),
