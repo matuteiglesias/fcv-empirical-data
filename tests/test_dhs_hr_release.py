@@ -30,6 +30,19 @@ def _dictionary_text() -> str:
     return """infix dictionary using ZZHR71FL.DAT {\n str6 hhid 1: 1-6\n int hv001 1: 7-9\n long hv005 1: 10-15\n int hv021 1: 16-18\n int hv022 1: 19-21\n byte hv012 1: 22-23\n byte hv025 1: 24-24\n byte hv201 1: 25-26\n byte hv206 1: 27-27\n byte hv270 1: 28-28\n long hv271 1: 29-36\n str2 note 1: 37-38\n}\n"""
 
 
+def test_dictionary_parser_accepts_dhs_unsized_str_declarations(tmp_path: Path):
+    dct = tmp_path / "ZZHR71FL.DCT"
+    dct.write_text(
+        'infix dictionary using "ZZHR71FL.DAT" {\n str hhid 1: 1-12\n}\n',
+        encoding="latin-1",
+    )
+
+    dictionary = parse_dhs_stata_dictionary(dct)
+
+    assert dictionary.column_names == ("hhid",)
+    assert dictionary.record_width == 12
+
+
 def _record(
     *,
     hhid: str,
@@ -210,13 +223,16 @@ def test_release_snapshot_mutation_of_dictionary_fails_closed(tmp_path: Path):
         )
 
 
-def test_short_fixed_width_record_fails_instead_of_silently_dropping_fields(tmp_path: Path):
+def test_short_fixed_width_record_is_right_padded_as_blank_dhs_suffix(tmp_path: Path):
     dat, dct = _release(tmp_path)
     dat.write_text("001001  1\n", encoding="latin-1")
     dictionary = parse_dhs_stata_dictionary(dct)
 
-    with pytest.raises(ValueError, match="shorter than dictionary width"):
-        read_dhs_fixed_width_dat(dat, dictionary)
+    frame = read_dhs_fixed_width_dat(dat, dictionary)
+
+    assert frame.loc[0, "hhid"] == "001001"
+    assert frame.loc[0, "hv001"] == "1"
+    assert pd.isna(frame.loc[0, "hv005"])
 
 
 def test_overlapping_dictionary_positions_fail_closed(tmp_path: Path):

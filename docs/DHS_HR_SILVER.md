@@ -99,11 +99,12 @@ snapshots. No cross-recode identity is inferred here.
 
 `read_dhs_fixed_width_dat(...)` reads source bytes by fixed byte position. Whitespace padding is
 removed from decoded field tokens; an all-whitespace field becomes missing. Leading zeros inside a
-field survive. The reader fails if a record is shorter than the dictionary width or has non-whitespace
-bytes beyond that width.
+field survive. A short record is right-padded only with blank bytes, matching DHS's omitted
+all-blank suffix convention; non-whitespace bytes beyond the dictionary width still fail closed.
 
 All parsed dictionary variables are decoded. The ingestion layer does not select only variables used
-by the current FCV research design.
+by the current FCV research design. DHS release writers may omit an all-blank trailing suffix; the
+reader restores that suffix as blank padding before decoding rather than treating it as data loss.
 
 ## Source-variable and design preservation
 

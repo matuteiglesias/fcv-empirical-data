@@ -32,7 +32,7 @@ from .dhs_hr import (
 )
 
 _DCT_FIELD_RE = re.compile(
-    r"^\s*(?P<storage>byte|int|long|float|double|str\d+)\s+"
+    r"^\s*(?P<storage>byte|int|long|float|double|str\d*)\s+"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s+"
     r"(?P<record>\d+):\s*(?P<start>\d+)\s*-\s*(?P<end>\d+)\s*$",
     re.IGNORECASE,
@@ -157,10 +157,9 @@ def read_dhs_fixed_width_dat(
         for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.rstrip(b"\r\n")
             if len(line) < dictionary.record_width:
-                raise ValueError(
-                    f"DHS fixed-width record {line_number} is shorter than dictionary width "
-                    f"{dictionary.record_width}"
-                )
+                # DHS release writers omit an all-blank suffix instead of serializing it.
+                # Restore that source-equivalent padding before fixed-position decoding.
+                line = line.ljust(dictionary.record_width, b" ")
             trailing = line[dictionary.record_width :]
             if trailing.strip():
                 raise ValueError(
