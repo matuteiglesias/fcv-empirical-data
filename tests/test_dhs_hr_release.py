@@ -5,7 +5,7 @@ import pytest
 from empirical_contracts import AuthorityLevel
 from spatial_foundation import DataRoot
 
-import fcv_empirical.surveys.dhs_hr_release as dhs_hr_release
+from fcv_empirical.surveys import dhs_hr_release
 from fcv_empirical.surveys.dhs_hr import STANDARD_DHS_HR_COLUMNS, DhsHrMetadata
 from fcv_empirical.surveys.dhs_hr_release import (
     materialize_dhs_hr_release_silver,
