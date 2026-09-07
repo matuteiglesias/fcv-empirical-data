@@ -42,9 +42,11 @@ from .dhs_hr import (
     build_dhs_survey_catalog,
     build_dhs_survey_id,
     iter_dhs_hr_design_records,
-    materialize_dhs_hr_silver as materialize_dhs_hr_legacy_tabular_silver,
     normalize_dhs_hr,
     register_dhs_hr_snapshot,
+)
+from .dhs_hr import (
+    materialize_dhs_hr_silver as materialize_dhs_hr_legacy_tabular_silver,
 )
 from .dhs_hr_release import (
     DhsFixedWidthDictionary,
