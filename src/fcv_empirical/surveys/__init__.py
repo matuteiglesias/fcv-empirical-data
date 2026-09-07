@@ -42,9 +42,17 @@ from .dhs_hr import (
     build_dhs_survey_catalog,
     build_dhs_survey_id,
     iter_dhs_hr_design_records,
-    materialize_dhs_hr_silver,
+    materialize_dhs_hr_silver as materialize_dhs_hr_legacy_tabular_silver,
     normalize_dhs_hr,
     register_dhs_hr_snapshot,
+)
+from .dhs_hr_release import (
+    DhsFixedWidthDictionary,
+    DhsFixedWidthField,
+    materialize_dhs_hr_release_silver,
+    parse_dhs_stata_dictionary,
+    read_dhs_fixed_width_dat,
+    register_dhs_hr_release_snapshot,
 )
 from .dhs_integration import DhsSurveyIntegrationReport, build_dhs_survey_integration_report
 from .dhs_variables import (
@@ -58,6 +66,10 @@ from .dhs_variables import (
 from .geography import SurveyGeographyLink
 from .variables import SurveyVariableMetadata, TemporalSemantics
 
+# Canonical package-level HR materialization now means authoritative fixed-width release decoding.
+# The former tabular materializer remains explicit for legacy/parity investigation only.
+materialize_dhs_hr_silver = materialize_dhs_hr_release_silver
+
 __all__ = [
     "DHS_GPS_SOURCE",
     "DHS_HR_RECODE",
@@ -70,6 +82,8 @@ __all__ = [
     "DhsCommissioningResult",
     "DhsCommissioningSpec",
     "DhsDisplacementPolicy",
+    "DhsFixedWidthDictionary",
+    "DhsFixedWidthField",
     "DhsGpsLinkageResult",
     "DhsGpsSilverResult",
     "DhsHouseholdMeasurementResult",
@@ -97,12 +111,17 @@ __all__ = [
     "materialize_dhs_commissioning_suite",
     "materialize_dhs_gps_silver",
     "materialize_dhs_household_measurements",
+    "materialize_dhs_hr_legacy_tabular_silver",
+    "materialize_dhs_hr_release_silver",
     "materialize_dhs_hr_silver",
     "materialize_dhs_reported_coordinate_membership",
     "nigeria_2018_commissioning_specs",
     "normalize_dhs_gps_clusters",
     "normalize_dhs_hr",
+    "parse_dhs_stata_dictionary",
+    "read_dhs_fixed_width_dat",
     "register_dhs_gps_snapshot",
+    "register_dhs_hr_release_snapshot",
     "register_dhs_hr_snapshot",
     "registry_sha256",
     "run_dhs_commissioning_suite",
