@@ -5,6 +5,7 @@ import pytest
 from empirical_contracts import AuthorityLevel, DataLayer, DatasetRef, GrainSpec
 from spatial_foundation import DataRoot, sha256_file
 
+from fcv_empirical.surveys import dhs_variables
 from fcv_empirical.surveys.catalog import SurveyCatalogEntry
 from fcv_empirical.surveys.dhs_variables import (
     DHS_VII_STANDARD_HR_REGISTRY,
@@ -209,3 +210,45 @@ def test_materialization_requires_exact_hashed_hr_silver(tmp_path: Path):
             data_root=DataRoot.from_path(tmp_path / "other-data"),
             run_id="dhs-variable-tamper",
         )
+
+
+def test_semantic_materialization_projects_only_registry_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    hr_path = tmp_path / "hr-wide.parquet"
+    _hr().assign(unrelated_source_field=["x", "y", "z", "w"]).to_parquet(hr_path, index=False)
+    dataset = _hr_dataset(sha256_file(hr_path))
+    original_read_parquet = dhs_variables.pd.read_parquet
+    projections: list[tuple[str, ...]] = []
+
+    def _projected_read(path, *args, **kwargs):
+        columns = kwargs.get("columns")
+        if columns is None:
+            raise AssertionError("semantic materialization must not full-read HR Silver")
+        projections.append(tuple(columns))
+        return original_read_parquet(path, *args, **kwargs)
+
+    monkeypatch.setattr(dhs_variables.pd, "read_parquet", _projected_read)
+
+    _, manifest, _, output = materialize_dhs_household_measurements(
+        hr_path=hr_path,
+        hr_dataset=dataset,
+        survey=_survey(),
+        data_root=DataRoot.from_path(tmp_path / "data-projected"),
+        run_id="dhs-variable-projected",
+    )
+
+    assert output.exists()
+    assert len(projections) == 1
+    assert set(projections[0]) == {
+        "survey_id",
+        "source_row_id",
+        "household_id",
+        "hv206",
+        "hv270",
+        "hv201",
+    }
+    assert "unrelated_source_field" not in projections[0]
+    assert manifest.parameters["whole_hr_silver_loaded"] is False
+    assert set(manifest.parameters["hr_read_projection"]) == set(projections[0])

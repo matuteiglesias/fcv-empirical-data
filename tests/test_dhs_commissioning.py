@@ -5,6 +5,7 @@ import pytest
 from empirical_contracts import AuthorityLevel, DataLayer, DatasetRef, GrainSpec
 from spatial_foundation import DataRoot, sha256_file
 
+from fcv_empirical.surveys import dhs_commissioning
 from fcv_empirical.surveys.catalog import SurveyCatalogEntry
 from fcv_empirical.surveys.dhs_commissioning import (
     DhsCommissioningSpec,
@@ -331,6 +332,7 @@ def test_materialization_hash_binds_inputs_and_persists_only_aggregate_evidence(
     assert dataset.grain.keys == ("benchmark_id", "cell_id")
     assert dataset.content_sha256 is not None
     assert manifest.parameters["joined_microdata_persisted"] is False
+    assert manifest.parameters["whole_hr_silver_loaded"] is False
     assert len(result.frame) == 2
 
     run = data_root.run("fcv-empirical-data", "dhs-commissioning-fixture")
@@ -351,17 +353,86 @@ def test_materialization_hash_binds_inputs_and_persists_only_aggregate_evidence(
         )
 
 
-def test_predeclared_reference_catalog_has_five_checks_and_no_guessed_water_mapping():
+def test_commissioning_materialization_projects_only_required_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    hr_path = tmp_path / "hr-wide.parquet"
+    measurement_path = tmp_path / "measurements-wide.parquet"
+    _hr().assign(unrelated_hr_field=["a", "b", "c", "d"]).to_parquet(hr_path, index=False)
+    _electricity().assign(unrelated_measurement_field=[1, 2, 3, 4]).to_parquet(
+        measurement_path, index=False
+    )
+    hr_dataset, measurement_dataset = _refs(
+        hr_hash=sha256_file(hr_path),
+        measurement_hash=sha256_file(measurement_path),
+    )
+    original_read_parquet = dhs_commissioning.pd.read_parquet
+    projections: dict[str, tuple[str, ...]] = {}
+
+    def _projected_read(path, *args, **kwargs):
+        columns = kwargs.get("columns")
+        if columns is None:
+            raise AssertionError("commissioning materialization must use Parquet column projection")
+        projections[Path(path).name] = tuple(columns)
+        return original_read_parquet(path, *args, **kwargs)
+
+    monkeypatch.setattr(dhs_commissioning.pd, "read_parquet", _projected_read)
+    spec = _electricity_spec(
+        population_multiplier_variable="HV012",
+        domain_variable="HV025",
+        domain_allowed_values=("1", "2"),
+    )
+
+    _, manifest, _, output = materialize_dhs_commissioning_suite(
+        hr_path=hr_path,
+        hr_dataset=hr_dataset,
+        measurement_path=measurement_path,
+        measurement_dataset=measurement_dataset,
+        survey=_survey(),
+        specs=(spec,),
+        data_root=DataRoot.from_path(tmp_path / "data-projected"),
+        run_id="dhs-commissioning-projected",
+    )
+
+    assert output.exists()
+    assert set(projections[hr_path.name]) == {
+        "survey_id",
+        "source_row_id",
+        "source_weight_variable",
+        "source_household_weight",
+        "hv012",
+        "hv025",
+    }
+    assert "unrelated_hr_field" not in projections[hr_path.name]
+    assert set(projections[measurement_path.name]) == {
+        "survey_id",
+        "source_row_id",
+        "measurement_id",
+        "measurement_status",
+        "normalized_value",
+    }
+    assert "unrelated_measurement_field" not in projections[measurement_path.name]
+    assert manifest.parameters["whole_hr_silver_loaded"] is False
+
+
+def test_predeclared_reference_catalog_has_eight_checks_and_no_guessed_water_mapping():
     nigeria = nigeria_2018_commissioning_specs()
     uganda = uganda_2016_commissioning_specs()
     zambia = zambia_2018_commissioning_specs()
 
-    assert len(nigeria) + len(uganda) + len(zambia) == 5
+    assert len(nigeria) + len(uganda) + len(zambia) == 8
     assert nigeria[0].expected_percentages["yes"] == 59.4
-    assert nigeria[1].expected_percentages["tube_well_borehole"] == 37.2
-    assert nigeria[1].require_release_category_map is True
-    assert nigeria[1].category_map == {}
-    assert nigeria[2].population_multiplier_variable == "HV012"
-    assert nigeria[2].domain_variable == "HV025"
+    assert nigeria[1].expected_percentages == {"no": 43.5, "yes": 56.5}
+    assert nigeria[1].population_multiplier_variable == "HV012"
+    assert nigeria[2].expected_percentages["tube_well_borehole"] == 37.2
+    assert nigeria[2].require_release_category_map is True
+    assert nigeria[2].category_map == {}
+    assert nigeria[3].population_multiplier_variable == "HV012"
+    assert nigeria[3].domain_variable == "HV025"
     assert uganda[0].expected_percentages["yes"] == 28.6
+    assert uganda[1].expected_percentages == {"no": 73.3, "yes": 26.7}
+    assert uganda[1].population_multiplier_variable == "HV012"
     assert zambia[0].expected_percentages["yes"] == 34.2
+    assert zambia[1].expected_percentages == {"no": 67.2, "yes": 32.8}
+    assert zambia[1].population_multiplier_variable == "HV012"

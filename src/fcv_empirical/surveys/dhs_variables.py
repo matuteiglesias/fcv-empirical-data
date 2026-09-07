@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 import pandas as pd
+import pyarrow.parquet as pq
 from empirical_contracts import (
     AuthorityLevel,
     CoverageContract,
@@ -226,6 +227,34 @@ def _resolve_source_column(frame: pd.DataFrame, source_variable: str) -> str:
             f"DHS HR Silver has ambiguous case variants for registry variable {source_variable!r}"
         )
     return str(matches[0])
+
+
+def _resolve_parquet_column(columns: tuple[str, ...], requested: str) -> str:
+    matches = [column for column in columns if column.casefold() == requested.casefold()]
+    if len(matches) != 1:
+        if not matches:
+            raise ValueError(f"DHS HR Silver Parquet is missing required column {requested!r}")
+        raise ValueError(f"DHS HR Silver Parquet has ambiguous case variants for {requested!r}")
+    return matches[0]
+
+
+def _measurement_hr_projection(
+    path: Path,
+    definitions: tuple[DhsVariableDefinition, ...],
+) -> tuple[str, ...]:
+    columns = tuple(str(name) for name in pq.ParquetFile(path).schema_arrow.names)
+    requested = (
+        "survey_id",
+        "source_row_id",
+        "household_id",
+        *(definition.source_variable for definition in definitions),
+    )
+    projection: list[str] = []
+    for name in requested:
+        resolved = _resolve_parquet_column(columns, name)
+        if resolved not in projection:
+            projection.append(resolved)
+    return tuple(projection)
 
 
 def _normalize_measurement(
@@ -466,8 +495,10 @@ def materialize_dhs_household_measurements(
     if sha256_file(path) != hr_dataset.content_sha256:
         raise ValueError("HR Silver bytes do not match the supplied DatasetRef content hash")
 
+    _validate_registry(survey, definitions)
+    hr_projection = _measurement_hr_projection(path, definitions)
     result = build_dhs_household_measurements(
-        pd.read_parquet(path),
+        pd.read_parquet(path, columns=list(hr_projection)),
         survey=survey,
         hr_dataset=hr_dataset,
         definitions=definitions,
@@ -492,6 +523,8 @@ def materialize_dhs_household_measurements(
             "survey_id": survey.survey_id,
             "registry_sha256": result.registry_sha256,
             "measurement_ids": [item.measurement_id for item in result.definitions],
+            "hr_read_projection": list(hr_projection),
+            "whole_hr_silver_loaded": False,
             "aggregation": None,
             "imputation": None,
         },

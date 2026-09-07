@@ -9,7 +9,7 @@ def nigeria_2018_commissioning_specs(
     *,
     water_category_map: Mapping[str, str] | None = None,
 ) -> tuple[DhsCommissioningSpec, ...]:
-    """Return the three predeclared Nigeria 2018 external-reference checks."""
+    """Return the four predeclared Nigeria 2018 external-reference checks."""
 
     return (
         DhsCommissioningSpec(
@@ -25,6 +25,21 @@ def nigeria_2018_commissioning_specs(
             expected_percentages={"no": 40.6, "yes": 59.4},
             category_map={"false": "no", "true": "yes"},
             notes=("National household distribution; source missing remains in the denominator.",),
+        ),
+        DhsCommissioningSpec(
+            benchmark_id="dhs.ng2018.de_jure_electricity.national",
+            survey_id="dhs-NG2018DHS",
+            measurement_id="dhs.household.electricity_access",
+            reference_authority="The DHS Program",
+            reference_publication="Nigeria Demographic and Health Survey 2018",
+            reference_publication_id="FR359",
+            reference_url="https://www.dhsprogram.com/pubs/pdf/FR359/FR359.pdf",
+            reference_table="2.4 Household characteristics",
+            reference_page=26,
+            expected_percentages={"no": 43.5, "yes": 56.5},
+            category_map={"false": "no", "true": "yes"},
+            population_multiplier_variable="HV012",
+            notes=("National de jure population; effective weight is HV005 x HV012.",),
         ),
         DhsCommissioningSpec(
             benchmark_id="dhs.ng2018.drinking_water_source.national",
@@ -109,6 +124,21 @@ def uganda_2016_commissioning_specs() -> tuple[DhsCommissioningSpec, ...]:
             expected_percentages={"no": 71.4, "yes": 28.6},
             category_map={"false": "no", "true": "yes"},
         ),
+        DhsCommissioningSpec(
+            benchmark_id="dhs.ug2016.de_jure_electricity.national",
+            survey_id="dhs-UG2016DHS",
+            measurement_id="dhs.household.electricity_access",
+            reference_authority="The DHS Program",
+            reference_publication="Uganda Demographic and Health Survey 2016",
+            reference_publication_id="FR333",
+            reference_url="https://www.dhsprogram.com/Pubs/Pdf/Fr333/Fr333.Pdf",
+            reference_table="2.4 Household characteristics",
+            reference_page=23,
+            expected_percentages={"no": 73.3, "yes": 26.7},
+            category_map={"false": "no", "true": "yes"},
+            population_multiplier_variable="HV012",
+            notes=("National de jure population; effective weight is HV005 x HV012.",),
+        ),
     )
 
 
@@ -126,6 +156,21 @@ def zambia_2018_commissioning_specs() -> tuple[DhsCommissioningSpec, ...]:
             reference_page=22,
             expected_percentages={"no": 65.8, "yes": 34.2},
             category_map={"false": "no", "true": "yes"},
+        ),
+        DhsCommissioningSpec(
+            benchmark_id="dhs.zm2018.de_jure_electricity.national",
+            survey_id="dhs-ZM2018DHS",
+            measurement_id="dhs.household.electricity_access",
+            reference_authority="The DHS Program",
+            reference_publication="Zambia Demographic and Health Survey 2018",
+            reference_publication_id="FR361",
+            reference_url="https://www.dhsprogram.com/pubs/pdf/FR361/FR361.pdf",
+            reference_table="2.4 Household characteristics",
+            reference_page=22,
+            expected_percentages={"no": 67.2, "yes": 32.8},
+            category_map={"false": "no", "true": "yes"},
+            population_multiplier_variable="HV012",
+            notes=("National de jure population; effective weight is HV005 x HV012.",),
         ),
     )
 
