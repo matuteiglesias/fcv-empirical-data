@@ -390,12 +390,12 @@ def _load_publication_transaction(
     entries: list[dict[str, str]] = []
     for raw, dataset in zip(raw_entries, manifest.outputs, strict=True):
         if not isinstance(raw, dict):
-            raise RuntimeError("publication transaction output entry is invalid")
+            raise TypeError("publication transaction output entry is invalid")
         destination = raw.get("destination")
         digest = raw.get("sha256")
         dataset_id = raw.get("dataset_id")
         if not isinstance(destination, str) or not isinstance(digest, str):
-            raise RuntimeError("publication transaction output entry is incomplete")
+            raise TypeError("publication transaction output entry is incomplete")
         if dataset_id != dataset.dataset_id or digest != dataset.content_sha256:
             raise RuntimeError("publication transaction output metadata disagrees with manifest")
         entries.append(
