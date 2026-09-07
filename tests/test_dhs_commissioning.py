@@ -243,6 +243,11 @@ def test_release_local_water_map_is_required_at_execution_not_registry_level():
         )
 
 
+def test_category_map_cannot_point_outside_declared_reference_cells():
+    with pytest.raises(ValueError, match="declared reference cells"):
+        _electricity_spec(category_map={"false": "not_a_report_cell"})
+
+
 def test_broken_row_linkage_and_invalid_weights_fail_closed():
     hr_dataset, measurement_dataset = _refs()
     broken = _electricity().iloc[:-1].copy()
@@ -261,6 +266,18 @@ def test_broken_row_linkage_and_invalid_weights_fail_closed():
     with pytest.raises(ValueError, match="strictly positive"):
         run_dhs_commissioning_suite(
             bad_hr,
+            _electricity(),
+            survey=_survey(),
+            hr_dataset=hr_dataset,
+            measurement_dataset=measurement_dataset,
+            specs=(_electricity_spec(),),
+        )
+
+    missing_weight_identity = _hr().copy()
+    missing_weight_identity.loc[0, "source_weight_variable"] = pd.NA
+    with pytest.raises(ValueError, match="weight variable is missing"):
+        run_dhs_commissioning_suite(
+            missing_weight_identity,
             _electricity(),
             survey=_survey(),
             hr_dataset=hr_dataset,
