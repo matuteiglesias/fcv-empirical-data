@@ -185,7 +185,7 @@ def read_historical_aiddata_archive(
         "published_scope": release.published_scope,
         "archive_filename": path.name,
         "source_member": member,
-        "row_count": int(len(source)),
+        "row_count": len(source),
         "column_count": len(source_columns),
         "source_columns": list(source_columns),
         "candidate_columns_for_review_only": candidates,
