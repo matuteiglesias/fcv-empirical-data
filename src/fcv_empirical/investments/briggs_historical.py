@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
 
-
 WORLD_BANK_ARCHIVE = "AllWorldBank_IBRDIDA.csv.zip"
 AFDB_ARCHIVE = "AfDB_2009_2010_AllApprovedProjects.xlsx.zip"
 
