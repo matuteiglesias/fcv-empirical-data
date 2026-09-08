@@ -8,11 +8,23 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from empirical_contracts import AuthorityLevel, DataLayer, DatasetRef, GrainSpec, QAResult, SourceSnapshotRef
+from empirical_contracts import (
+    AuthorityLevel,
+    DataLayer,
+    DatasetRef,
+    GrainSpec,
+    QAResult,
+    SourceSnapshotRef,
+)
 from spatial_foundation import DataRoot, register_external_snapshot
 
 from fcv_empirical.common import FileMaterialization, materialize_files, persist_run_artifact
-from fcv_empirical.investments.common import InvestmentMaterializationResult, json_text, persist_contract_artifacts
+from fcv_empirical.investments.common import (
+    InvestmentMaterializationResult,
+    json_text,
+    persist_contract_artifacts,
+    validate_source_snapshot,
+)
 
 
 @dataclass(frozen=True)
@@ -25,7 +37,14 @@ class HistoricalAidDataRelease:
     published_scope: str
 
     def __post_init__(self) -> None:
-        for name in ("release_id", "donor", "source_id", "origin", "archive_filename", "published_scope"):
+        for name in (
+            "release_id",
+            "donor",
+            "source_id",
+            "origin",
+            "archive_filename",
+            "published_scope",
+        ):
             if not str(getattr(self, name)).strip():
                 raise ValueError(f"{name} must be non-empty")
 
@@ -39,7 +58,9 @@ BRIGGS_WB_2011 = HistoricalAidDataRelease(
         "AllWorldBank_IBRDIDA.csv.zip"
     ),
     archive_filename="AllWorldBank_IBRDIDA.csv.zip",
-    published_scope="geocoded World Bank IBRD/IDA projects approved 1997-2011; 2011 historical release",
+    published_scope=(
+        "geocoded World Bank IBRD/IDA projects approved 1997-2011; 2011 historical release"
+    ),
 )
 
 BRIGGS_AFDB_2009_2010 = HistoricalAidDataRelease(
@@ -81,7 +102,9 @@ def _read_member(archive: zipfile.ZipFile, member: str) -> pd.DataFrame:
     if suffix == ".csv":
         return pd.read_csv(io.BytesIO(payload), dtype=str, keep_default_na=False, low_memory=False)
     if suffix == ".xlsx":
-        return pd.read_excel(io.BytesIO(payload), dtype=str, keep_default_na=False, engine="openpyxl")
+        return pd.read_excel(
+            io.BytesIO(payload), dtype=str, keep_default_na=False, engine="openpyxl"
+        )
     raise ValueError(f"unsupported historical AidData member type: {member}")
 
 
@@ -125,8 +148,8 @@ def read_historical_aiddata_archive(
         raise FileNotFoundError(path)
     if path.name != release.archive_filename:
         raise ValueError(
-            f"archive filename must be {release.archive_filename!r} for release {release.release_id!r}; "
-            f"got {path.name!r}"
+            f"archive filename must be {release.archive_filename!r} for release "
+            f"{release.release_id!r}; got {path.name!r}"
         )
     if not zipfile.is_zipfile(path):
         raise ValueError(f"historical AidData source must be a ZIP archive: {path}")
@@ -188,7 +211,10 @@ def read_historical_aiddata_archive(
                 "physical source-row numbering is unique; substantive project/location identity "
                 "remains unresolved until an explicit release field map is commissioned"
             ),
-            metrics={"source_rows": len(rows), "unique_source_row_numbers": rows["fcv_source_row_number"].nunique()},
+            metrics={
+                "source_rows": len(rows),
+                "unique_source_row_numbers": rows["fcv_source_row_number"].nunique(),
+            },
         ),
     )
     return HistoricalAidDataExtraction(
@@ -212,7 +238,7 @@ def register_historical_aiddata_snapshot(
     return snapshot.model_copy(update={"origin": release.origin})
 
 
-def _dataset_ref(release: HistoricalAidDataRelease, version: str) -> DatasetRef:
+def _dataset_ref(version: str) -> DatasetRef:
     return DatasetRef(
         dataset_id="investments.aiddata_historical_geocoded.rows",
         version=version,
@@ -243,9 +269,15 @@ def materialize_historical_aiddata_silver(
 
     path = Path(archive_path)
     snapshot = source_snapshot or register_historical_aiddata_snapshot(path, release=release)
+    validate_source_snapshot(
+        snapshot,
+        expected_source=release.source_id,
+        expected_release=release.release_id,
+        exact_paths=[path],
+    )
     extraction = read_historical_aiddata_archive(path, release=release)
     version = snapshot.snapshot_id
-    dataset = _dataset_ref(release, version)
+    dataset = _dataset_ref(version)
     silver_base = data_root.silver("investments", "aiddata_historical_geocoded", version)
 
     manifest = materialize_files(
@@ -257,7 +289,9 @@ def materialize_historical_aiddata_silver(
                 dataset=dataset,
                 relative_path="rows.parquet",
                 destination_base=silver_base,
-                writer=lambda output: extraction.rows.to_parquet(output, index=False, engine="pyarrow"),
+                writer=lambda output: extraction.rows.to_parquet(
+                    output, index=False, engine="pyarrow"
+                ),
             ),
         ),
         parameters={
@@ -276,7 +310,10 @@ def materialize_historical_aiddata_silver(
     hashed_ref = manifest.outputs[0]
     parity = {
         "status": "NOT_RUN",
-        "reason": "no independent source-native legacy table was supplied; Briggs final analysis data is an oracle, not source parity input",
+        "reason": (
+            "no independent source-native legacy table was supplied; Briggs final analysis data "
+            "is an oracle, not source parity input"
+        ),
     }
     persist_contract_artifacts(
         data_root=data_root,
@@ -312,5 +349,7 @@ def write_historical_aiddata_schema_audit(
     extraction = read_historical_aiddata_archive(archive_path, release=release)
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(extraction.audit, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(extraction.audit, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
     return path
