@@ -48,6 +48,7 @@ from .dhs_hr import (
 from .dhs_hr import (
     materialize_dhs_hr_silver as materialize_dhs_hr_legacy_tabular_silver,
 )
+from .dhs_hr_low_memory_writer import install_low_memory_dhs_hr_writer
 from .dhs_hr_release import (
     DhsFixedWidthDictionary,
     DhsFixedWidthField,
@@ -69,6 +70,8 @@ from .geography import SurveyGeographyLink
 from .variables import SurveyVariableMetadata, TemporalSemantics
 
 # Canonical package-level HR materialization now means authoritative fixed-width release decoding.
+# Install the ultra-wide low-memory Parquet profile before exposing the canonical materializer.
+install_low_memory_dhs_hr_writer()
 # The former tabular materializer remains explicit for legacy/parity investigation only.
 materialize_dhs_hr_silver = materialize_dhs_hr_release_silver
 
