@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pandas as pd
 from empirical_contracts import (
     AuthorityLevel,
     DataLayer,
@@ -9,6 +8,7 @@ from empirical_contracts import (
     GrainSpec,
     PeriodScheme,
 )
+from shapely.geometry import Point
 from spatial_foundation import DataRoot
 
 from fcv_empirical.investments.geogcdf import register_geogcdf_snapshot
@@ -71,8 +71,8 @@ def test_gold_only_resume_reuses_hash_bound_relations_without_republishing_them(
     snapshot = register_geogcdf_snapshot(source, release="v3.0.1")
 
     silver = _silver().copy()
-    # Force one explicit unresolved geography project so the new policy is exercised.
-    silver.loc[1, "geometry"] = silver.loc[1, "geometry"].boundary.interpolate(0.5, normalized=True)
+    # Exact boundary between EXA.1 and EXA.2: deliberately unresolved point.
+    silver.loc[1, "geometry"] = Point(1, 0.5)
     units = _geography()
     geography = GeographySpec(provider="gadm", version="4.1", scheme="native", level="adm2")
     scheme = PeriodScheme(width_years=2, anchor_year=2001)
@@ -105,6 +105,7 @@ def test_gold_only_resume_reuses_hash_bound_relations_without_republishing_them(
     assert gold_path.exists()
     assert gold_ref.content_sha256 is not None
     assert result.resolution_policy == "exclude_unresolved"
+    assert result.excluded_unresolved_project_count == 1
     assert manifest.parameters["reused_governed_relations"] is True
     assert geography_relation_ref in manifest.inputs
     assert period_relation_ref in manifest.inputs
