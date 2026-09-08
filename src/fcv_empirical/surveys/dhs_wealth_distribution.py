@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pandas as pd
 from empirical_contracts import QAResult
+import pandas as pd
 
 
 QUINTILE_LABELS = {
@@ -88,9 +88,11 @@ def build_dhs_wealth_region_shares(
     if hr_frame.empty:
         raise ValueError("DHS HR frame must be non-empty")
 
-    survey_col = _resolve_column(hr_frame, "survey_id") if "survey_id" in {
-        str(column).casefold() for column in hr_frame.columns
-    } else None
+    survey_col = (
+        _resolve_column(hr_frame, "survey_id")
+        if "survey_id" in {str(column).casefold() for column in hr_frame.columns}
+        else None
+    )
     if survey_col is not None:
         survey_values = hr_frame[survey_col].astype("string").str.strip().dropna().unique().tolist()
         if survey_values != [spec.survey_id]:
@@ -179,17 +181,21 @@ def build_dhs_wealth_region_shares(
     )
     long["wealth_quintile_label"] = long["wealth_quintile"].map(QUINTILE_LABELS)
     long.insert(0, "survey_id", spec.survey_id)
-    long = long[
-        [
-            "survey_id",
-            "region_code",
-            "wealth_quintile",
-            "wealth_quintile_label",
-            "weighted_dejure_population",
-            "national_quintile_weight",
-            "wealth_quintile_region_share",
+    long = (
+        long[
+            [
+                "survey_id",
+                "region_code",
+                "wealth_quintile",
+                "wealth_quintile_label",
+                "weighted_dejure_population",
+                "national_quintile_weight",
+                "wealth_quintile_region_share",
+            ]
         ]
-    ].sort_values(["region_code", "wealth_quintile"]).reset_index(drop=True)
+        .sort_values(["region_code", "wealth_quintile"])
+        .reset_index(drop=True)
+    )
 
     sums = long.groupby("wealth_quintile")["wealth_quintile_region_share"].sum()
     max_sum_error = float((sums - 1.0).abs().max())
@@ -221,9 +227,9 @@ def build_dhs_wealth_region_shares(
             f"{spec.sample_weight_variable} * {spec.dejure_household_size_variable}"
         ),
         "source_weight_scale_normalized": False,
-        "household_rows": int(len(hr_frame)),
+        "household_rows": len(hr_frame),
         "region_count": len(regions),
-        "dense_region_quintile_rows": int(len(long)),
+        "dense_region_quintile_rows": len(long),
         "zero_region_quintile_cells": zero_cells,
         "max_quintile_share_sum_error": max_sum_error,
     }
