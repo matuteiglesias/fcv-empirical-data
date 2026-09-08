@@ -111,6 +111,8 @@ def test_commitment_gold_materializes_structural_zeros_without_allocating_amount
     # 2001-02 through 2019-20: 10 periods x 2 EXA geographies.
     assert len(gold.frame) == 20
     assert set(gold.frame["country_iso3"]) == {"EXA"}
+    assert gold.resolution_policy == "require_complete"
+    assert gold.excluded_unresolved_project_count == 0
     a_2003 = gold.frame[
         gold.frame["geo_uid"].eq("gadm:4.1:adm2:EXA.1")
         & gold.frame["period_id"].eq("2003-2004")
@@ -153,6 +155,68 @@ def test_structural_zero_gold_fails_when_target_country_project_geography_is_unr
         )
 
 
+def test_non_strict_gold_explicitly_excludes_unresolved_projects_from_measurement_universe():
+    silver = _silver().copy()
+    silver.loc[1, "geometry"] = Point(1, 0.5)  # unresolved exact-boundary point
+    geography_units = _geography()
+    geography = GeographySpec(provider="gadm", version="4.1", scheme="native", level="adm2")
+    scheme = PeriodScheme(width_years=2, anchor_year=2001)
+    geography_relation = relate_geogcdf_geography(silver, geography_units).frame
+    period_relation = assign_geogcdf_periods(silver, scheme=scheme).frame
+
+    gold = build_geogcdf_commitment_gold(
+        silver,
+        geography_relation,
+        period_relation,
+        geography_units,
+        period_scheme=scheme,
+        require_complete_resolution=False,
+    )
+
+    assert gold.resolution_policy == "exclude_unresolved"
+    assert gold.unresolved_geography_project_count == 1
+    assert gold.unresolved_commitment_time_project_count == 0
+    assert gold.excluded_unresolved_project_count == 1
+    resolution_qa = next(q for q in gold.qa if q.check_id == "geogcdf.gold.resolution")
+    assert resolution_qa.state == "YELLOW"
+    assert resolution_qa.metrics["excluded_unresolved_projects"] == 1
+
+    a_2003 = gold.frame[
+        gold.frame["geo_uid"].eq("gadm:4.1:adm2:EXA.1")
+        & gold.frame["period_id"].eq("2003-2004")
+    ].iloc[0]
+    assert a_2003["project_count"] == 1
+
+    coverage = build_geogcdf_commitment_coverage(
+        gold,
+        geography=geography,
+        period_scheme=scheme,
+    )
+    assert "explicitly excludes 1 target-country source project rows" in coverage.basis
+
+    source_dataset = DatasetRef(
+        dataset_id="investments.aiddata_geogcdf.projects",
+        version="snapshot",
+        schema_version="v1",
+        layer=DataLayer.SILVER,
+        authority=AuthorityLevel.L3_REBUILT,
+        grain=GrainSpec(keys=("project_geometry_row_id",)),
+    )
+    contract = build_geogcdf_commitment_measurement_contract(
+        silver_dataset=source_dataset,
+        geography=geography,
+        period_scheme=scheme,
+        coverage=coverage,
+        covered_country_iso3=gold.covered_country_iso3,
+        resolution_policy=gold.resolution_policy,
+        unresolved_geography_project_count=gold.unresolved_geography_project_count,
+        unresolved_commitment_time_project_count=gold.unresolved_commitment_time_project_count,
+        excluded_unresolved_project_count=gold.excluded_unresolved_project_count,
+    )
+    assert contract.parameters["resolution_policy"] == "exclude_unresolved"
+    assert contract.parameters["excluded_unresolved_project_count"] == 1
+
+
 def test_commitment_measurement_contract_describes_source_defined_zero_not_global_no_investment():
     silver = _silver()
     geography_units = _geography()
@@ -182,10 +246,16 @@ def test_commitment_measurement_contract_describes_source_defined_zero_not_globa
         period_scheme=scheme,
         coverage=coverage,
         covered_country_iso3=gold.covered_country_iso3,
+        resolution_policy=gold.resolution_policy,
+        unresolved_geography_project_count=gold.unresolved_geography_project_count,
+        unresolved_commitment_time_project_count=gold.unresolved_commitment_time_project_count,
+        excluded_unresolved_project_count=gold.excluded_unresolved_project_count,
     )
 
     assert coverage.absent_row_semantics == "not_observed"
     assert contract.parameters["structural_zeros_materialized"] is True
+    assert contract.parameters["resolution_policy"] == "require_complete"
+    assert contract.parameters["excluded_unresolved_project_count"] == 0
     assert contract.parameters["amount_allocation"] is None
     assert contract.parameters["amount_sum_materialized"] is False
     assert contract.output_grain.keys == ("geo_uid", "period_id")

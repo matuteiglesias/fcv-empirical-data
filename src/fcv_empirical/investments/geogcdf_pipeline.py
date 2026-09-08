@@ -205,6 +205,8 @@ def materialize_geogcdf_measurement(
             "source_universe_start_year": source_universe_start_year,
             "source_universe_end_year": source_universe_end_year,
             "require_complete_resolution": require_complete_resolution,
+            "resolution_policy": gold_result.resolution_policy,
+            "excluded_unresolved_project_count": gold_result.excluded_unresolved_project_count,
             "point_geography_policy": "matched_unique_only",
             "areal_geography_policy": "all_positive_area_overlaps",
             "project_date_type": "commitment",
@@ -230,6 +232,12 @@ def materialize_geogcdf_measurement(
         period_scheme=period_scheme,
         coverage=coverage,
         covered_country_iso3=gold_result.covered_country_iso3,
+        resolution_policy=gold_result.resolution_policy,
+        unresolved_geography_project_count=gold_result.unresolved_geography_project_count,
+        unresolved_commitment_time_project_count=(
+            gold_result.unresolved_commitment_time_project_count
+        ),
+        excluded_unresolved_project_count=gold_result.excluded_unresolved_project_count,
     )
     persist_run_artifact(
         data_root,
@@ -250,6 +258,26 @@ def materialize_geogcdf_measurement(
         run_id,
         "coverage/covered_country_iso3.json",
         _json_text(list(gold_result.covered_country_iso3)),
+        overwrite=overwrite,
+    )
+    persist_run_artifact(
+        data_root,
+        run_id,
+        "coverage/resolution_exclusions.json",
+        _json_text(
+            {
+                "resolution_policy": gold_result.resolution_policy,
+                "unresolved_geography_project_count": (
+                    gold_result.unresolved_geography_project_count
+                ),
+                "unresolved_commitment_time_project_count": (
+                    gold_result.unresolved_commitment_time_project_count
+                ),
+                "excluded_unresolved_project_count": (
+                    gold_result.excluded_unresolved_project_count
+                ),
+            }
+        ),
         overwrite=overwrite,
     )
 
