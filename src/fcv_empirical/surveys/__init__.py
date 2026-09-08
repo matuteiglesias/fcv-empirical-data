@@ -66,6 +66,12 @@ from .dhs_variables import (
     materialize_dhs_household_measurements,
     registry_sha256,
 )
+from .dhs_wealth_distribution import (
+    QUINTILE_LABELS,
+    DhsWealthRegionResult,
+    DhsWealthRegionSpec,
+    build_dhs_wealth_region_shares,
+)
 from .geography import SurveyGeographyLink
 from .variables import SurveyVariableMetadata, TemporalSemantics
 
@@ -82,6 +88,7 @@ __all__ = [
     "DHS_VII_STANDARD_HR_REGISTRY",
     "HOUSEHOLD_GRAIN",
     "POSSIBLE_GEOGRAPHY_UNDER_DISPLACEMENT",
+    "QUINTILE_LABELS",
     "REPORTED_COORDINATE_MEMBERSHIP",
     "STANDARD_DHS_HR_COLUMNS",
     "DhsCommissioningResult",
@@ -98,6 +105,8 @@ __all__ = [
     "DhsReportedMembershipResult",
     "DhsSurveyIntegrationReport",
     "DhsVariableDefinition",
+    "DhsWealthRegionResult",
+    "DhsWealthRegionSpec",
     "ObservationGrain",
     "SurveyCatalogEntry",
     "SurveyDesignRecord",
@@ -112,6 +121,7 @@ __all__ = [
     "build_dhs_survey_catalog",
     "build_dhs_survey_id",
     "build_dhs_survey_integration_report",
+    "build_dhs_wealth_region_shares",
     "iter_dhs_hr_design_records",
     "materialize_dhs_commissioning_suite",
     "materialize_dhs_gps_silver",
