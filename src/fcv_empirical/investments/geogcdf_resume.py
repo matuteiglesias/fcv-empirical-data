@@ -23,7 +23,6 @@ from .geogcdf_measurements import (
 )
 from .geogcdf_pipeline import _gold_ref, _json_text
 
-
 GEOGRAPHY_RELATION_DATASET_ID = "investments.aiddata_geogcdf.project_geography"
 PERIOD_RELATION_DATASET_ID = "investments.aiddata_geogcdf.project_period"
 
