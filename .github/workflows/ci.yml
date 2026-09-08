@@ -31,7 +31,4 @@ jobs:
       - name: Tests
         run: python -m pytest
       - name: Ruff
-        run: |
-          python -m ruff check src tests --fix
-          git diff -- src tests
-          test -z "$(git status --porcelain src tests)"
+        run: python -m ruff check src tests
