@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from hashlib import sha256
-from pathlib import Path
-from typing import Iterable
 import json
 import zipfile
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+from pathlib import Path
 
 
 WORLD_BANK_ARCHIVE = "AllWorldBank_IBRDIDA.csv.zip"
