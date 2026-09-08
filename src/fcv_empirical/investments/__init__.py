@@ -54,9 +54,9 @@ from .worldbank import (
 )
 
 __all__ = [
-    "AidDataExtraction",
     "BRIGGS_AFDB_2009_2010",
     "BRIGGS_WB_2011",
+    "AidDataExtraction",
     "GeoGCDFGeographyResult",
     "GeoGCDFGoldResult",
     "GeoGCDFPeriodResult",
