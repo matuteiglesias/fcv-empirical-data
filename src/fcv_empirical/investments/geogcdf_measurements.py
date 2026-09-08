@@ -37,6 +37,10 @@ class GeoGCDFGoldResult:
     qa: tuple[QAResult, ...]
     covered_country_iso3: tuple[str, ...]
     full_coverage_period_ids: tuple[str, ...]
+    resolution_policy: str
+    unresolved_geography_project_count: int
+    unresolved_commitment_time_project_count: int
+    excluded_unresolved_project_count: int
 
 
 def relate_geogcdf_geography(
@@ -307,12 +311,13 @@ def build_geogcdf_commitment_gold(
     source_universe_end_year: int = 2021,
     require_complete_resolution: bool = True,
 ) -> GeoGCDFGoldResult:
-    """Build dense commitment-period project-count measurement over verified source support.
+    """Build dense commitment-period project counts over a declared project universe.
 
-    Structural zeros mean zero *source-reported GeoGCDF commitment projects intersecting
-    the area-period* within recipient countries represented by the source and periods fully
-    contained in the declared source project universe. They do not mean no investment exists
-    in reality.
+    In strict mode every target-country project must resolve in geography and commitment
+    time before structural zeros are licensed. In non-strict mode unresolved projects are
+    explicitly excluded from the measurement universe; structural zeros then mean zero
+    *resolved, eligible source-reported GeoGCDF commitment projects* in the area-period.
+    They never mean that no investment exists in reality.
     """
     if source_universe_end_year < source_universe_start_year:
         raise ValueError("source universe end year must be >= start year")
@@ -366,11 +371,15 @@ def build_geogcdf_commitment_gold(
     unresolved_time = target_project_rows.loc[
         ~target_project_rows["project_geometry_row_id"].astype(str).isin(assigned_period_rows)
     ]
-    if require_complete_resolution and (len(unresolved_geo) or len(unresolved_time)):
+    unresolved_ids = set(unresolved_geo["project_geometry_row_id"].astype(str)) | set(
+        unresolved_time["project_geometry_row_id"].astype(str)
+    )
+    if require_complete_resolution and unresolved_ids:
         raise ValueError(
             "cannot license structural-zero commitment support while target-country projects "
             f"remain unresolved (geography={len(unresolved_geo)}, time={len(unresolved_time)})"
         )
+    resolution_policy = "require_complete" if require_complete_resolution else "exclude_unresolved"
 
     full_periods = _full_periods_within(
         period_scheme,
@@ -463,23 +472,34 @@ def build_geogcdf_commitment_gold(
         ]
     ].sort_values(["geo_uid", "period_id"]).reset_index(drop=True)
 
+    resolution_state = "GREEN" if not unresolved_ids else "YELLOW"
+    resolution_message = (
+        "all target-country source projects resolve in geography and commitment time"
+        if not unresolved_ids
+        else (
+            "unresolved target-country projects are explicitly excluded from the measurement "
+            "universe before dense structural-zero support is materialized"
+        )
+    )
     qa = (
         QAResult(
             check_id="geogcdf.gold.resolution",
-            state="GREEN" if len(unresolved_geo) == 0 and len(unresolved_time) == 0 else "YELLOW",
-            message="structural-zero support is conditioned on explicit geography/time resolution",
+            state=resolution_state,
+            message=resolution_message,
             metrics={
                 "target_country_project_rows": len(target_project_rows),
+                "resolution_policy": resolution_policy,
                 "unresolved_geography_projects": len(unresolved_geo),
                 "unresolved_commitment_time_projects": len(unresolved_time),
+                "excluded_unresolved_projects": len(unresolved_ids),
             },
         ),
         QAResult(
             check_id="geogcdf.gold.dense_support",
             state="GREEN",
             message=(
-                "Gold explicitly materializes source-defined structural zeros only for covered "
-                "recipient countries and periods fully inside the declared commitment universe"
+                "Gold materializes structural zeros over the declared eligible project universe, "
+                "covered recipient countries, and periods fully inside the commitment universe"
             ),
             metrics={
                 "covered_countries": len(covered_countries),
@@ -488,6 +508,7 @@ def build_geogcdf_commitment_gold(
                 "gold_rows": len(gold),
                 "structural_zero_rows": int(gold["measurement_status"].eq("structural_zero").sum()),
                 "observed_rows": int(gold["record_present"].sum()),
+                "excluded_unresolved_projects": len(unresolved_ids),
             },
         ),
         QAResult(
@@ -505,6 +526,10 @@ def build_geogcdf_commitment_gold(
         qa=qa,
         covered_country_iso3=covered_countries,
         full_coverage_period_ids=full_period_ids,
+        resolution_policy=resolution_policy,
+        unresolved_geography_project_count=len(unresolved_geo),
+        unresolved_commitment_time_project_count=len(unresolved_time),
+        excluded_unresolved_project_count=len(unresolved_ids),
     )
 
 
@@ -515,9 +540,20 @@ def build_geogcdf_commitment_coverage(
     period_scheme: PeriodScheme,
 ) -> CoverageContract:
     index = PeriodIndex(period_scheme)
-    periods = [index.period_for(int(period_id.split("-", 1)[0])) for period_id in result.full_coverage_period_ids]
+    periods = [
+        index.period_for(int(period_id.split("-", 1)[0]))
+        for period_id in result.full_coverage_period_ids
+    ]
     temporal_start = min(period.start_date for period in periods)
     temporal_end = max(period.end_date_exclusive - timedelta(days=1) for period in periods)
+    exclusion_text = ""
+    if result.excluded_unresolved_project_count:
+        exclusion_text = (
+            f" The measurement universe explicitly excludes "
+            f"{result.excluded_unresolved_project_count} target-country source project rows that "
+            "could not be resolved in geography or commitment time; the persisted relation and "
+            "period products retain those unresolved source rows as audit evidence."
+        )
     return CoverageContract(
         geography_scope=(
             f"{geography.id}; recipient countries represented in source and target geography: "
@@ -526,8 +562,8 @@ def build_geogcdf_commitment_coverage(
         temporal_start=temporal_start,
         temporal_end=temporal_end,
         observation_semantics=(
-            "dense counts of GeoGCDF source projects by commitment period and analytical geography; "
-            "areal projects may legitimately expose multiple geographies"
+            "dense counts of eligible GeoGCDF source projects by commitment period and analytical "
+            "geography; areal projects may legitimately expose multiple geographies"
         ),
         absent_row_semantics="not_observed",
         authority=AuthorityLevel.L3_REBUILT,
@@ -536,6 +572,7 @@ def build_geogcdf_commitment_coverage(
             "representations for those projects. Structural zeros are materialized as rows only "
             "for periods fully inside that declared range and countries represented in both source "
             "and target geography."
+            + exclusion_text
         ),
     )
 
@@ -547,19 +584,24 @@ def build_geogcdf_commitment_measurement_contract(
     period_scheme: PeriodScheme,
     coverage: CoverageContract,
     covered_country_iso3: tuple[str, ...],
+    resolution_policy: str = "require_complete",
+    unresolved_geography_project_count: int = 0,
+    unresolved_commitment_time_project_count: int = 0,
+    excluded_unresolved_project_count: int = 0,
 ) -> MeasurementContract:
     return MeasurementContract(
         measure_id="aiddata.geogcdf.commitment_exposure.area_period",
         description=(
             "GeoGCDF project counts by source commitment period and analytical geography, "
-            "including explicit source-defined structural-zero rows over verified support"
+            "including explicit source-defined structural-zero rows over the declared eligible "
+            "project universe"
         ),
         source_dataset=silver_dataset,
         output_grain=GrainSpec(keys=("geo_uid", "period_id")),
         unit="source-reported projects",
         aggregation=(
-            "count unique source projects intersecting geography; separately count projects with "
-            "known and positive reported project-level amount"
+            "count unique eligible source projects intersecting geography; separately count "
+            "projects with known and positive reported project-level amount"
         ),
         coverage=coverage,
         geography=geography,
@@ -568,6 +610,10 @@ def build_geogcdf_commitment_measurement_contract(
             "project_date_type": "commitment",
             "point_geography_policy": "matched_unique_only",
             "areal_geography_policy": "all_positive_area_overlaps",
+            "resolution_policy": resolution_policy,
+            "unresolved_geography_project_count": unresolved_geography_project_count,
+            "unresolved_commitment_time_project_count": unresolved_commitment_time_project_count,
+            "excluded_unresolved_project_count": excluded_unresolved_project_count,
             "amount_allocation": None,
             "amount_sum_materialized": False,
             "structural_zeros_materialized": True,
