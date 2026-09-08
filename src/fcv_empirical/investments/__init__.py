@@ -6,6 +6,16 @@ from .aiddata_clg import (
     materialize_aiddata_silver,
     register_aiddata_snapshot,
 )
+from .aiddata_historical_geocoded import (
+    BRIGGS_AFDB_2009_2010,
+    BRIGGS_WB_2011,
+    HistoricalAidDataExtraction,
+    HistoricalAidDataRelease,
+    materialize_historical_aiddata_silver,
+    read_historical_aiddata_archive,
+    register_historical_aiddata_snapshot,
+    write_historical_aiddata_schema_audit,
+)
 from .annotation_candidates import (
     SilverTableInput,
     build_aiddata_annotation_candidates,
@@ -45,11 +55,15 @@ from .worldbank import (
 
 __all__ = [
     "AidDataExtraction",
+    "BRIGGS_AFDB_2009_2010",
+    "BRIGGS_WB_2011",
     "GeoGCDFGeographyResult",
     "GeoGCDFGoldResult",
     "GeoGCDFPeriodResult",
     "GeoGCDFSilverResult",
     "GeoGCDFVerticalResult",
+    "HistoricalAidDataExtraction",
+    "HistoricalAidDataRelease",
     "InvestmentMaterializationResult",
     "SilverTableInput",
     "WorldBankExtraction",
@@ -68,10 +82,14 @@ __all__ = [
     "materialize_geogcdf_measurement",
     "materialize_geogcdf_silver",
     "materialize_geogcdf_vertical",
+    "materialize_historical_aiddata_silver",
     "materialize_worldbank_silver",
     "normalize_geogcdf_projects",
+    "read_historical_aiddata_archive",
     "register_aiddata_snapshot",
     "register_geogcdf_snapshot",
+    "register_historical_aiddata_snapshot",
     "register_worldbank_snapshot",
     "relate_geogcdf_geography",
+    "write_historical_aiddata_schema_audit",
 ]
