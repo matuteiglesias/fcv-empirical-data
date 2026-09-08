@@ -9,8 +9,6 @@ import zipfile
 import pandas as pd
 
 from .briggs_historical import (
-    AFDB_ARCHIVE,
-    WORLD_BANK_ARCHIVE,
     BriggsHistoricalSourceError,
     preflight_briggs_historical_aid_sources,
 )
@@ -48,11 +46,14 @@ def _number(series: pd.Series) -> pd.Series:
 
 
 def _year(series: pd.Series) -> pd.Series:
-    dt = pd.to_datetime(series, errors="coerce")
-    out = dt.dt.year.astype("Int64")
+    """Parse a source year/date without interpreting integer years as epoch nanoseconds."""
     numeric = pd.to_numeric(series, errors="coerce")
-    direct = numeric.where(numeric.between(1900, 2100)).astype("Int64")
-    return out.fillna(direct)
+    direct = numeric.where(numeric.between(1900, 2100)).round().astype("Int64")
+    unresolved = direct.isna()
+    if unresolved.any():
+        parsed = pd.to_datetime(series.where(unresolved), errors="coerce")
+        direct = direct.fillna(parsed.dt.year.astype("Int64"))
+    return direct
 
 
 def _normalized_project_name(value: object) -> str | None:
