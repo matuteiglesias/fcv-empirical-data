@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from empirical_contracts import QAResult
 import pandas as pd
+from empirical_contracts import QAResult
 
 
 QUINTILE_LABELS = {
