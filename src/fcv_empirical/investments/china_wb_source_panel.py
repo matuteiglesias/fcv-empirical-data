@@ -26,7 +26,6 @@ from spatial_foundation import DataRoot, PeriodIndex
 
 from fcv_empirical.common import FileMaterialization, materialize_files, persist_run_artifact
 
-
 WB_POSITIVE = "aggregated_from_resolved_source_geocodes"
 WB_ZERO = "zero_among_resolved_eligible_source_geocodes"
 CN_POSITIVE = "aggregated_from_observed"
@@ -369,7 +368,7 @@ def build_aiddata_china_wb_panel(
             state="GREEN",
             message="Common area-period join is complete, one-to-one, and country-consistent",
             metrics={
-                "areas": int(len(target_geo)),
+                "areas": len(target_geo),
                 "periods": len(period_ids),
                 "area_periods": len(result),
                 "countries": len(common_countries),
