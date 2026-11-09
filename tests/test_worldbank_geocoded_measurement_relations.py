@@ -1,11 +1,20 @@
 import geopandas as gpd
 import pandas as pd
 import pytest
-from empirical_contracts import PeriodScheme
+from empirical_contracts import (
+    AuthorityLevel,
+    DataLayer,
+    DatasetRef,
+    GeographySpec,
+    GrainSpec,
+    PeriodScheme,
+)
 from shapely.geometry import Polygon
+from spatial_foundation import DataRoot
 
 from fcv_empirical.investments.worldbank_geocoded_measurement_relations import (
     build_wb_geocoded_relations,
+    materialize_wb_geocoded_relations,
 )
 
 
@@ -144,12 +153,6 @@ def test_duplicate_source_location_id_refused() -> None:
 
 
 def test_wb_relation_materialization_has_traceable_inputs(tmp_path):
-    from empirical_contracts import AuthorityLevel, DataLayer, DatasetRef, GeographySpec, GrainSpec
-    from spatial_foundation import DataRoot
-    from fcv_empirical.investments.worldbank_geocoded_measurement_relations import (
-        materialize_wb_geocoded_relations,
-    )
-
     geo, names = _geography()
     projects, loc = _wb()
     names_path = tmp_path / "gadm_names.csv"
